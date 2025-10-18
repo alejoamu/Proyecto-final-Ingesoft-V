@@ -98,6 +98,7 @@ services:
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
       - EUREKA_INSTANCE_HOSTNAME=product-service-container
+      - EUREKA_INSTANCE_NON_SECURE_PORT=8500
 
   shipping-service-container:
     image: selimhorri/shipping-service-ecommerce-boot:0.1.0

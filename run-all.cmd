@@ -40,6 +40,16 @@ if errorlevel 1 (
 for /f %%i in ('docker-compose -f compose.yml ps -q order-service-container') do set ORDER_ID=%%i
 call :wait_order 180
 
+REM Levantar PRODUCT-SERVICE y esperar readiness
+echo [run-all] Iniciando product-service-container...
+docker-compose -f compose.yml up -d product-service-container
+if errorlevel 1 (
+  echo [run-all] ERROR: Fallo al levantar product-service-container
+  exit /b 1
+)
+for /f %%i in ('docker-compose -f compose.yml ps -q product-service-container') do set PRODUCT_ID=%%i
+call :wait_product 180
+
 
 echo [run-all] Iniciando servicios de aplicacion restantes...
 docker-compose -f compose.yml up -d
@@ -120,4 +130,27 @@ goto :order_end
 :order_ready
 echo [run-all] Order Service listo.
 :order_end
+exit /b 0
+
+:wait_product
+REM Arguments: %1 = timeout (segundos)
+set /a TIMEOUT=%~1
+if "%TIMEOUT%"=="" set TIMEOUT=180
+if not defined PRODUCT_ID (
+  echo [run-all] ADVERTENCIA: No se obtuvo el ID de Product Service; se usara el nombre del servicio
+  set PRODUCT_ID=product-service-container
+)
+echo [run-all] Esperando a Product Service (%PRODUCT_ID%) hasta %TIMEOUT%s...
+for /l %%i in (1,1,%TIMEOUT%) do (
+  docker logs %PRODUCT_ID% 2>&1 | findstr /C:"Tomcat started on port(s): 8500" >nul && goto :product_ready
+  docker logs %PRODUCT_ID% 2>&1 | findstr /C:"Started" >nul && goto :product_ready
+  if %%i lss %TIMEOUT% (
+    >nul ping -n 2 127.0.0.1
+  )
+)
+echo [run-all] AVISO: Timeout esperando Product Service; se continuara de todas formas.
+goto :product_end
+:product_ready
+echo [run-all] Product Service listo.
+:product_end
 exit /b 0
