@@ -56,6 +56,7 @@ services:
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
       - EUREKA_INSTANCE_HOSTNAME=order-service-container
+      - EUREKA_INSTANCE_NON_SECURE_PORT=8300
 
   payment-service-container:
     image: selimhorri/payment-service-ecommerce-boot:0.1.0
@@ -63,6 +64,8 @@ services:
       - "8400:8400"
     networks:
       - microservices_network
+    depends_on:
+      - order-service-container
     environment:
       - SPRING_PROFILES_ACTIVE=dev
       - SPRING_ZIPKIN_BASE_URL=http://zipkin:9411
@@ -75,6 +78,7 @@ services:
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
       - EUREKA_INSTANCE_HOSTNAME=payment-service-container
+      - EUREKA_INSTANCE_NON_SECURE_PORT=8400
 
   product-service-container:
     image: selimhorri/product-service-ecommerce-boot:0.1.0

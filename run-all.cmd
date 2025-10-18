@@ -30,8 +30,18 @@ call :wait_eureka 120
 REM Esperar a que Config Server este listo
 call :wait_config 120
 
+REM Levantar primero el ORDER-SERVICE y esperar readiness
+echo [run-all] Iniciando order-service-container primero...
+docker-compose -f compose.yml up -d order-service-container
+if errorlevel 1 (
+  echo [run-all] ERROR: Fallo al levantar order-service-container
+  exit /b 1
+)
+for /f %%i in ('docker-compose -f compose.yml ps -q order-service-container') do set ORDER_ID=%%i
+call :wait_order 180
 
-echo [run-all] Iniciando servicios de aplicacion...
+
+echo [run-all] Iniciando servicios de aplicacion restantes...
 docker-compose -f compose.yml up -d
 if errorlevel 1 (
   echo [run-all] ERROR: Fallo al levantar compose.yml
@@ -87,4 +97,27 @@ goto :config_end
 :config_ready
 echo [run-all] Config Server listo.
 :config_end
+exit /b 0
+
+:wait_order
+REM Arguments: %1 = timeout (segundos)
+set /a TIMEOUT=%~1
+if "%TIMEOUT%"=="" set TIMEOUT=180
+if not defined ORDER_ID (
+  echo [run-all] ADVERTENCIA: No se obtuvo el ID de Order Service; se usara el nombre del servicio
+  set ORDER_ID=order-service-container
+)
+echo [run-all] Esperando a Order Service (%ORDER_ID%) hasta %TIMEOUT%s...
+for /l %%i in (1,1,%TIMEOUT%) do (
+  docker logs %ORDER_ID% 2>&1 | findstr /C:"Tomcat started on port(s): 8300" >nul && goto :order_ready
+  docker logs %ORDER_ID% 2>&1 | findstr /C:"Started" >nul && goto :order_ready
+  if %%i lss %TIMEOUT% (
+    >nul ping -n 2 127.0.0.1
+  )
+)
+echo [run-all] AVISO: Timeout esperando Order Service; se continuara de todas formas.
+goto :order_end
+:order_ready
+echo [run-all] Order Service listo.
+:order_end
 exit /b 0
