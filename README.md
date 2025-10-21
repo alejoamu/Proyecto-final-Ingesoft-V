@@ -125,33 +125,83 @@ All build commands and test suite for each microservice should run successfully,
 ```
 
 ### Running Them All
-Now it's the time to run all of our Microservices, and it's straightforward just run the following `docker-compose` commands:
+
+We now run the landscape in two steps to ensure all services resolve Zipkin, Eureka and Config Server by name inside a shared network:
+
+1) Start core services (Zipkin, Eureka and Config Server):
 
 ```bash
-selim@:~/ecommerce-microservice-backend-app$ docker-compose -f compose.yml up
+# from the project root
+docker-compose -f core.yml up -d
 ```
 
-All the **services**, **databases**, and **messaging service** will run in parallel in detach mode (option `-d`), and command output will print to the console the following:
+2) Wait until Eureka and Config Server are READY. Check logs:
 
 ```bash
-Creating network "ecommerce-microservice-backend-app_default" with the default driver
-Creating ecommerce-microservice-backend-app_api-gateway-container_1       ... done
-Creating ecommerce-microservice-backend-app_favourite-service-container_1 ... done
-Creating ecommerce-microservice-backend-app_service-discovery-container_1 ... done
-Creating ecommerce-microservice-backend-app_shipping-service-container_1  ... done
-Creating ecommerce-microservice-backend-app_order-service-container_1     ... done
-Creating ecommerce-microservice-backend-app_user-service-container_1      ... done
-Creating ecommerce-microservice-backend-app_payment-service-container_1   ... done
-Creating ecommerce-microservice-backend-app_product-service-container_1   ... done
-Creating ecommerce-microservice-backend-app_proxy-client-container_1      ... done
-Creating ecommerce-microservice-backend-app_zipkin-container_1            ... done
-Creating ecommerce-microservice-backend-app_cloud-config-container_1      ... done
+docker logs -f <service-discovery-container-id>
+docker logs -f <cloud-config-container-id>
 ```
+
+You should see messages similar to:
+- Eureka: "Finished initializing remote region registries."
+- API Gateway (later): 200 OK responses to http://service-discovery-container:8761/eureka/...
+
+3) Start the remaining microservices on the same network:
+
+```bash
+docker-compose -f compose.yml up -d
+```
+
+Windows helper scripts (optional):
+- Double-click or run `run-all.cmd` to: bring up core, wait for readiness, then start the rest.
+- Double-click or run `stop-all.cmd` to: stop app services, then stop core.
+
+Example endpoints to verify:
+- http://localhost:8080/app/api/products
+- http://localhost:8600/shipping-service/api/shippings
+- http://localhost:8700/user-service/api/users
+- http://localhost:8500/product-service/api/products
+- http://localhost:8800/favourite-service/api/favourites
+- http://localhost:8400/payment-service/api/payments
+
+To create a user (example):
+
+```http
+POST http://localhost:8700/user-service/api/users
+Content-Type: application/json
+
+{
+  "userId": 123,
+  "firstName": "Alejandro",
+  "lastName": "Cordoba",
+  "imageUrl": "https://example.com/img.jpg",
+  "email": "alejandro@example.com",
+  "addressDtos": [
+    {
+      "fullAddress": "123 Main St",
+      "postalCode": "12345",
+      "city": "New York"
+    }
+  ],
+  "credential": {
+    "username": "johndoe",
+    "password": "securePassword123",
+    "roleBasedAuthority": "ROLE_USER",
+    "isEnabled": true,
+    "isAccountNonExpired": true,
+    "isAccountNonLocked": true,
+    "isCredentialsNonExpired": true
+  }
+}
+```
+
+> Nota: En los archivos de Compose, las variables de entorno usan guiones bajos (por ejemplo `SPRING_ZIPKIN_BASE_URL`, `EUREKA_CLIENT_AVAILABILITY_ZONES_DEFAULT`) para que Spring las mapee correctamente.
+
 ### Access proxy-client APIs
 You can manually test `proxy-client` APIs throughout its **Swagger** interface at the following
  URL [https://localhost:8900/swagger-ui.html](https://localhost:8900/swagger-ui.html).
 ### Access Service Discovery Server (Eureka)
-If you would like to access the Eureka service discovery point to this URL [http://localhosts:8761/eureka](https://localhost:8761/eureka) to see all the services registered inside it. 
+If you would like to access the Eureka service discovery point to this URL [http://localhost:8761/eureka](https://localhost:8761/eureka) to see all the services registered inside it. 
 
 ### Access user-service APIs
  URL [https://localhost:8700/swagger-ui.html](https://localhost:8700/swagger-ui.html).
@@ -173,7 +223,7 @@ The **API Gateway** and **Store Service** both act as a *resource server*. <!--T
         "jvm.classes.loaded",
         "jvm.classes.unloaded",
         "jvm.gc.live.data.size",
-        "jvm.gc.max.data.size",
+        "jvm.gc.max.data size",
         "jvm.gc.memory.allocated",
         "jvm.gc.memory.promoted",
         "jvm.gc.pause",
@@ -589,27 +639,15 @@ Now, you can now track Microservices interactions throughout Zipkin UI from the 
 
 ### Closing The Story
 
-Finally, to close the story, we need to shut down Microservices manually service by service, hahaha just kidding, run the following command to shut them all:
+To stop containers, first stop the application services and then the core services:
 
 ```bash
-selim@:~/ecommerce-microservice-backend-app$ docker-compose -f compose.yml down --remove-orphans
+# stop non-core services
+docker-compose -f compose.yml down --remove-orphans
+# stop core (zipkin, eureka, config)
+docker-compose -f core.yml down --remove-orphans
 ```
- And you should see output like the following:
 
-```bash
-Removing ecommerce-microservice-backend-app_payment-service-container_1   ... done
-Removing ecommerce-microservice-backend-app_zipkin-container_1            ... done
-Removing ecommerce-microservice-backend-app_service-discovery-container_1 ... done
-Removing ecommerce-microservice-backend-app_product-service-container_1   ... done
-Removing ecommerce-microservice-backend-app_cloud-config-container_1      ... done
-Removing ecommerce-microservice-backend-app_proxy-client-container_1      ... done
-Removing ecommerce-microservice-backend-app_order-service-container_1     ... done
-Removing ecommerce-microservice-backend-app_user-service-container_1      ... done
-Removing ecommerce-microservice-backend-app_shipping-service-container_1  ... done
-Removing ecommerce-microservice-backend-app_api-gateway-container_1       ... done
-Removing ecommerce-microservice-backend-app_favourite-service-container_1 ... done
-Removing network ecommerce-microservice-backend-app_default
-```
 ### The End
 In the end, I hope you enjoyed the application and find it useful, as I did when I was developing it. 
 If you would like to enhance, please: 
