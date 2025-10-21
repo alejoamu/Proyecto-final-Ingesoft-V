@@ -1,0 +1,22 @@
+controller:
+  serviceType: NodePort
+  service:
+    nodePort: {{ jenkins_nodeport }}
+  installPlugins:
+    {% for p in jenkins_plugins %}
+    - {{ p }}
+    {% endfor %}
+  {% if jenkins_create_github_token_credential and (jenkins_github_token is defined) and (jenkins_github_token | length > 0) %}
+  JCasC:
+    configScripts:
+      credentials: |
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - string:
+                      scope: GLOBAL
+                      id: "{{ jenkins_github_token_id }}"
+                      secret: "{{ jenkins_github_token }}"
+                      description: "GitHub token for releases"
+  {% endif %}

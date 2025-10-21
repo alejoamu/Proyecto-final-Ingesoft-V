@@ -1,0 +1,5 @@
+---
+# Valores por defecto para todos los hosts Ansible
+ansible_user: azureuser
+ansible_password: "P@ssword1-2025!"
+# ansible_become_password: "P@ssword1-2025!"   # Descomenta si sudo solicita contraseña

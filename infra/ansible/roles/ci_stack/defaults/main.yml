@@ -1,0 +1,26 @@
+---
+jenkins_namespace: "ci"
+sonarqube_namespace: "ci"
+trivy_namespace: "trivy-system"
+jenkins_release: "jenkins"
+sonarqube_release: "sonarqube"
+trivy_release: "trivy-operator"
+jenkins_chart: "jenkinsci/jenkins"
+sonarqube_chart: "sonarqube/sonarqube"
+trivy_chart: "aqua/trivy-operator"
+jenkins_nodeport: 32080
+sonarqube_nodeport: 32000
+
+# Plugins necesarios para el pipeline y el seed DSL
+jenkins_plugins:
+  - job-dsl:1.87
+  - workflow-aggregator:596.v8c21c963d92d
+  - git:5.2.1
+  - github:1.37.3
+  - junit:1265.v65b_14fa_f12f0
+  - credentials-binding:677.vdc9d38cb_2574
+
+# Opcional: crear credencial GH_TOKEN en Jenkins (JCasC) de forma automática
+jenkins_create_github_token_credential: false
+jenkins_github_token_id: "github-token"
+# jenkins_github_token: ""  # NO lo guardes en archivos; pásalo con -e y se manejará sin log

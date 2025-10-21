@@ -1,0 +1,72 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - curl
+  - git
+
+write_files:
+  - path: /usr/local/bin/bootstrap-ci.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      echo "[bootstrap-ci] Instalando k3s..."
+      curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
+
+      echo "[bootstrap-ci] Esperando a que k3s este listo..."
+      for i in {1..60}; do
+        if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+          break
+        fi
+        sleep 2
+      done
+
+      export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+      echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' > /etc/profile.d/kube.sh
+
+      echo "[bootstrap-ci] Instalando Helm..."
+      curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      echo "[bootstrap-ci] Esperando a que el nodo este Ready..."
+      for i in {1..60}; do
+        if kubectl get nodes | grep -q " Ready "; then
+          break
+        fi
+        sleep 5
+      done
+
+      echo "[bootstrap-ci] Agregando repos de Helm..."
+      helm repo add jenkinsci https://charts.jenkins.io
+      helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
+      helm repo add aqua https://aquasecurity.github.io/helm-charts
+      helm repo update
+
+      echo "[bootstrap-ci] Instalando Jenkins (NodePort 32080) en namespace ci..."
+      helm upgrade --install jenkins jenkinsci/jenkins \
+        --namespace ci --create-namespace \
+        --set controller.serviceType=NodePort \
+        --set controller.service.nodePort=32080 \
+        --set persistence.enabled=true
+
+      echo "[bootstrap-ci] Instalando SonarQube (NodePort 32000) en namespace ci..."
+      helm upgrade --install sonarqube sonarqube/sonarqube \
+        --namespace ci \
+        --set service.type=NodePort \
+        --set service.nodePort=32000 \
+        --set persistence.enabled=true \
+        --set postgresql.enabled=true
+
+      echo "[bootstrap-ci] Instalando Trivy Operator en namespace trivy-system..."
+      helm upgrade --install trivy-operator aqua/trivy-operator \
+        --namespace trivy-system --create-namespace
+
+      echo "[bootstrap-ci] Listo. Accesos: Jenkins NodePort 32080, SonarQube NodePort 32000"
+
+runcmd:
+  - [ bash, -lc, "sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config" ]
+  - [ bash, -lc, "systemctl restart sshd || systemctl restart ssh" ]
+  - [ bash, -lc, "/usr/local/bin/bootstrap-ci.sh" ]
+  - [ bash, -lc, "echo 'CI listo: Jenkins http://$(curl -s ifconfig.me):32080 | SonarQube http://$(curl -s ifconfig.me):32000' > /etc/motd" ]

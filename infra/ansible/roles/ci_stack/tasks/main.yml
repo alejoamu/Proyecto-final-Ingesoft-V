@@ -1,0 +1,101 @@
+---
+- name: Instalar paquetes base
+  apt:
+    update_cache: true
+    name:
+      - curl
+      - git
+    state: present
+
+- name: Instalar k3s (server)
+  shell: |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
+  args:
+    executable: /bin/bash
+  register: k3s_install
+  changed_when: "installed" in k3s_install.stdout or k3s_install.stderr
+
+- name: Esperar a que exista kubeconfig de k3s
+  stat:
+    path: /etc/rancher/k3s/k3s.yaml
+  register: kcfg
+  until: kcfg.stat.exists
+  retries: 30
+  delay: 2
+
+- name: Definir KUBECONFIG para tareas posteriores
+  set_fact:
+    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+
+- name: Instalar Helm 3
+  shell: |
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    executable: /bin/bash
+  register: helm_install
+  changed_when: "Helm v" in helm_install.stdout or helm_install.stderr
+
+- name: Esperar a que el nodo este Ready
+  shell: |
+    kubectl get nodes
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: nodes_out
+  until: nodes_out.stdout is search(" Ready ")
+  retries: 30
+  delay: 5
+
+- name: Agregar repos de Helm
+  shell: |
+    helm repo add jenkinsci https://charts.jenkins.io
+    helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
+    helm repo add aqua https://aquasecurity.github.io/helm-charts
+    helm repo update
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  args:
+    executable: /bin/bash
+
+- name: Renderizar values de Jenkins con plugins
+  template:
+    src: jenkins-values.yaml.j2
+    dest: /tmp/jenkins-values.yaml
+    mode: '0644'
+  no_log: "{{ jenkins_create_github_token_credential and (jenkins_github_token is defined) and (jenkins_github_token | length > 0) }}"
+
+- name: Instalar/Actualizar Jenkins (NodePort) con plugins
+  shell: |
+    helm upgrade --install {{ jenkins_release }} {{ jenkins_chart }} \
+      --namespace {{ jenkins_namespace }} --create-namespace \
+      --values /tmp/jenkins-values.yaml \
+      --set controller.serviceType=NodePort \
+      --set controller.service.nodePort={{ jenkins_nodeport }} \
+      --set persistence.enabled=true
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Instalar/Actualizar SonarQube (NodePort)
+  shell: |
+    helm upgrade --install {{ sonarqube_release }} {{ sonarqube_chart }} \
+      --namespace {{ sonarqube_namespace }} \
+      --set service.type=NodePort \
+      --set service.nodePort={{ sonarqube_nodeport }} \
+      --set service.nodePorts.http={{ sonarqube_nodeport }} \
+      --set persistence.enabled=true \
+      --set postgresql.enabled=true
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Instalar/Actualizar Trivy Operator
+  shell: |
+    helm upgrade --install {{ trivy_release }} {{ trivy_chart }} \
+      --namespace {{ trivy_namespace }} --create-namespace
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Mostrar endpoints
+  debug:
+    msg:
+      - "Jenkins:    NodePort {{ jenkins_nodeport }} (namespace {{ jenkins_namespace }})"
+      - "SonarQube:  NodePort {{ sonarqube_nodeport }} (namespace {{ sonarqube_namespace }})"
+      - "Trivy:      namespace {{ trivy_namespace }}"

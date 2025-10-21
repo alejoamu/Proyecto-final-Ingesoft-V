@@ -1,0 +1,55 @@
+---
+- name: Crear directorio de app
+  file:
+    path: "{{ app_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Sincronizar repositorio al servidor (excluir .git y ansible)
+  synchronize:
+    src: "{{ repo_src }}"
+    dest: "{{ app_dir }}"
+    rsync_opts:
+      - "--exclude=.git/"
+      - "--exclude=infra/ansible/"
+      - "--exclude=infra/azure/terraform/.terraform/"
+      - "--delete-after"
+  delegate_to: localhost
+
+- name: Login de Docker (opcional, si usas registro privado)
+  debug:
+    msg: "Si necesitas autenticacion a un registro privado, agrega una tarea docker_login aqui."
+
+- name: Pull de imagenes definidas en core.yml
+  command: docker compose -f {{ app_dir }}/{{ core_compose }} pull
+  register: pull_core
+  changed_when: pull_core.stdout is search('Pulling') or pull_core.stderr is search('Pulling')
+
+- name: Levantar core.yml
+  command: docker compose -f {{ app_dir }}/{{ core_compose }} up -d
+
+- name: Esperar a Eureka (8761) y Config Server (9296)
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ item }}"
+    timeout: 120
+    state: started
+  loop:
+    - 8761
+    - 9296
+
+- name: Pull de imagenes definidas en compose.yml
+  command: docker compose -f {{ app_dir }}/{{ app_compose }} pull
+  register: pull_app
+  changed_when: pull_app.stdout is search('Pulling') or pull_app.stderr is search('Pulling')
+
+- name: Levantar compose.yml
+  command: docker compose -f {{ app_dir }}/{{ app_compose }} up -d
+
+- name: Mostrar servicios en ejecucion
+  command: docker ps --format 'table {{"{{"}}.Names{{"}}"}}\t{{"{{"}}.Status{{"}}"}}\t{{"{{"}}.Ports{{"}}"}}'
+  register: docker_ps
+  changed_when: false
+
+- debug:
+    var: docker_ps.stdout

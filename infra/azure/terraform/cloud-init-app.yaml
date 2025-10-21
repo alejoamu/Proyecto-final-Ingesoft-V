@@ -1,0 +1,37 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - docker.io
+  - docker-compose-plugin
+  - git
+
+write_files:
+  - path: /usr/local/bin/run-stack.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      REPO_DIR="/opt/ecommerce"
+      if [ ! -d "$REPO_DIR" ]; then
+        echo "El directorio $REPO_DIR no existe. Copia el repo ahi antes de ejecutar."
+        exit 1
+      fi
+      cd "$REPO_DIR"
+      echo "[run-stack] Levantando core.yml..."
+      docker compose -f core.yml up -d
+      echo "[run-stack] Esperando 15s..."
+      sleep 15
+      echo "[run-stack] Levantando compose.yml..."
+      docker compose -f compose.yml up -d
+      echo "[run-stack] Servicios en ejecucion:"
+      docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+runcmd:
+  - [ bash, -lc, "sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config" ]
+  - [ bash, -lc, "systemctl restart sshd || systemctl restart ssh" ]
+  - [ bash, -lc, "usermod -aG docker ${admin_username:-azureuser} || usermod -aG docker azureuser || true" ]
+  - [ bash, -lc, "systemctl enable docker && systemctl restart docker" ]
+  - [ bash, -lc, "mkdir -p /opt/ecommerce" ]
+  - [ bash, -lc, "echo 'Docker y Compose instalados. Copia tu repo a /opt/ecommerce y ejecuta: sudo /usr/local/bin/run-stack.sh' > /etc/motd" ]
