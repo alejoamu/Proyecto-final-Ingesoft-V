@@ -1,7 +1,0 @@
----
-app_dir: "/opt/ecommerce"
-repo_src: "."
-core_compose: "core.yml"
-app_compose: "compose.yml"
-bringup_delay_seconds: 15
-
