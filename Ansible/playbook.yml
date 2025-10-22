@@ -1,0 +1,487 @@
+---
+# =========================================================
+# PLAY 1: Instalar y configurar Nginx en la máquina 'nginx'
+# =========================================================
+- name: Instalar y configurar Nginx
+  hosts: nginx
+  become: true
+  tasks:
+    - name: Actualizar cache de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Instalar Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Cambiar propietario de /var/www/html
+      file:
+        path: /var/www/html
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: yes
+
+    - name: Asegurar directorios de sitios existen
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /etc/nginx/sites-available
+        - /etc/nginx/sites-enabled
+
+    - name: Instalar nginx.conf base (incluye sites-enabled)
+      template:
+        src: nginx-base.conf.j2
+        dest: /etc/nginx/nginx.conf
+        mode: '0644'
+        validate: 'nginx -t -c %s'
+      notify: validar y reiniciar nginx
+
+    # --- Instalar el sitio de reverse proxy ---
+    - name: Copiar configuración de reverse proxy a sites-available
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/sites-available/reverse-proxy
+        mode: '0644'
+      notify: validar y reiniciar nginx
+
+    - name: Deshabilitar sitio por defecto si existe
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: validar y reiniciar nginx
+
+    - name: Habilitar reverse-proxy (sites-enabled)
+      file:
+        src: /etc/nginx/sites-available/reverse-proxy
+        dest: /etc/nginx/sites-enabled/reverse-proxy
+        state: link
+        force: yes
+      notify: validar y reiniciar nginx
+
+    # --- Firewall UFW para la VM Nginx (opcional) ---
+    - name: Instalar UFW
+      apt:
+        name: ufw
+        state: present
+      when: enable_ufw | default(false)
+
+    - name: Establecer política por defecto (incoming deny, outgoing allow)
+      ufw:
+        direction: incoming
+        policy: deny
+      when: enable_ufw | default(false)
+
+    - name: Establecer política por defecto (outgoing allow)
+      ufw:
+        direction: outgoing
+        policy: allow
+      when: enable_ufw | default(false)
+
+    - name: Permitir OpenSSH (22)
+      ufw:
+        rule: allow
+        name: OpenSSH
+      when: enable_ufw | default(false)
+
+    - name: Permitir HTTP (80)
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+      when: enable_ufw | default(false)
+
+    # - name: Permitir HTTPS (443) [opcional]
+    #   ufw:
+    #     rule: allow
+    #     port: '443'
+    #     proto: tcp
+    #   when: enable_ufw | default(false)
+
+    - name: Habilitar UFW
+      ufw:
+        state: enabled
+        logging: on
+      when: enable_ufw | default(false)
+
+  handlers:
+    - name: Validar configuración de Nginx
+      listen: "validar y reiniciar nginx"
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+      failed_when: nginx_test.rc != 0
+
+    - name: Reiniciar/arrancar Nginx con configuración válida
+      listen: "validar y reiniciar nginx"
+      systemd:
+        name: nginx
+        state: restarted
+        enabled: yes
+
+# =========================================================
+# PLAY 2: Instalar Docker + Docker Compose + Desplegar Jenkins & SonarQube
+# =========================================================
+- name: Instalar Docker y desplegar Jenkins/SonarQube
+  hosts: jenkins
+  become: true
+  vars:
+    enable_swap: true
+    swap_file_path: /swapfile
+    swap_file_size_mb: 4096
+  tasks:
+    - name: Actualizar cache de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Instalar dependencias para Docker
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+        state: present
+
+    - name: Agregar la clave GPG oficial de Docker
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Agregar el repositorio de Docker
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable
+        state: present
+
+    - name: Actualizar cache de paquetes después de agregar repo
+      apt:
+        update_cache: yes
+
+    - name: Instalar Docker Engine y plugins (incluye Compose v2)
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Asegurar que el servicio Docker esté iniciado y habilitado
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Añadir el usuario actual al grupo docker
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Eliminar binario antiguo de docker-compose si existe (Compose v1)
+      file:
+        path: /usr/local/bin/docker-compose
+        state: absent
+
+    - name: Establecer vm.max_map_count en el kernel
+      sysctl:
+        name: vm.max_map_count
+        value: "262144"
+        state: present
+        reload: yes
+
+    # === Configurar/Redimensionar swap ANTES de levantar contenedores ===
+    - name: Obtener estado del archivo de swap
+      stat:
+        path: "{{ swap_file_path }}"
+      register: swap_stat
+      when: enable_swap | default(true)
+
+    - name: Definir tamaño deseado de swap en bytes
+      set_fact:
+        swap_desired_bytes: "{{ (swap_file_size_mb | int) * 1024 * 1024 }}"
+      when: enable_swap | default(true)
+
+    - name: Redimensionar o crear swap si es necesario
+      block:
+        - name: Deshabilitar swap si está activo (idempotente)
+          command: swapoff {{ swap_file_path }}
+          register: swapoff_out
+          failed_when: false
+          changed_when: swapoff_out.rc == 0
+
+        - name: Crear/Redimensionar archivo de swap al tamaño deseado
+          shell: |
+            set -e
+            fallocate -l {{ swap_file_size_mb }}M {{ swap_file_path }} || dd if=/dev/zero of={{ swap_file_path }} bs=1M count={{ swap_file_size_mb }}
+            chmod 600 {{ swap_file_path }}
+            mkswap {{ swap_file_path }}
+
+        - name: Habilitar swap en runtime
+          command: swapon {{ swap_file_path }}
+
+      when: enable_swap | default(true)
+        and (not swap_stat.stat.exists or (swap_stat.stat.exists and (swap_stat.stat.size | int) < (swap_desired_bytes | int)))
+
+    - name: Asegurar entrada en /etc/fstab para swap
+      mount:
+        name: none
+        src: "{{ swap_file_path }}"
+        fstype: swap
+        opts: sw
+        state: present
+      when: enable_swap | default(true)
+
+    - name: Ajustar swappiness (opcional)
+      sysctl:
+        name: vm.swappiness
+        value: "10"
+        state: present
+        reload: yes
+      when: enable_swap | default(true)
+
+    - name: Copiar archivo docker-compose.yml al servidor
+      copy:
+        src: docker-compose.yml
+        dest: /home/{{ ansible_user }}/docker-compose.yml
+        mode: '0644'
+
+    # Asegurar que SonarQube use el contexto /sonar creando/forzando sonar.properties en el volumen de conf
+    - name: Establecer sonar.web.context en el volumen sonarqube_conf
+      shell: |
+        docker run --rm -v sonarqube_conf:/opt/sonarqube/conf busybox sh -c 'echo "sonar.web.context=/sonar" > /opt/sonarqube/conf/sonar.properties && chmod 644 /opt/sonarqube/conf/sonar.properties'
+      changed_when: true
+
+    # --- Limpieza de despliegues anteriores para evitar conflictos de nombre ---
+    - name: Detener y eliminar stack previo (sin volúmenes)
+      command: docker compose down --remove-orphans
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+      failed_when: false
+      changed_when: false
+      when: not (reset_sonar_data | default(false))
+
+    - name: Detener y eliminar stack previo + volúmenes (reset datos Sonar)
+      command: docker compose down -v --remove-orphans
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+      failed_when: false
+      changed_when: false
+      when: reset_sonar_data | default(false)
+
+    - name: Eliminar volúmenes de Postgres (precaución, borra datos)
+      shell: |
+        docker volume rm -f postgresql postgresql_data || true
+      args:
+        chdir: /home/{{ ansible_user }}/
+
+      become: true
+      changed_when: false
+      when: reset_sonar_data | default(false)
+
+    - name: Eliminar contenedores antiguos que puedan causar conflicto (jenkins)
+      shell: |
+        docker rm -f $(docker ps -aq --filter name=jenkins) || true
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+      changed_when: false
+
+    - name: Eliminar contenedores antiguos que puedan causar conflicto (sonarqube)
+      shell: |
+        docker rm -f $(docker ps -aq --filter name=sonarqube) || true
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+      changed_when: false
+
+    - name: Eliminar contenedores antiguos que puedan causar conflicto (db/postgres)
+      shell: |
+        docker rm -f $(docker ps -aq --filter name=db) $(docker ps -aq --filter name=postgres) || true
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+      changed_when: false
+
+    - name: Descargar imágenes necesarias (docker compose pull)
+      command: docker compose pull
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+
+    # === NUEVO ORDEN: Levantar primero Jenkins ===
+    - name: Levantar Jenkins primero
+      command: docker compose up -d --force-recreate jenkins
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+
+    - name: Esperar a que Jenkins esté escuchando en 8080
+      wait_for:
+        host: 127.0.0.1
+        port: 8080
+        delay: 2
+        timeout: 600
+
+    # Arranque secuencial para reducir consumo de RAM en B1s
+    - name: Levantar solo Postgres (db)
+      command: docker compose up -d --force-recreate db
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+
+    - block:
+        - name: Esperar a que Postgres esté healthy (hasta 10 minutos)
+          shell: docker inspect --format='{{"{{"}} .State.Health.Status {{"}}"}}' postgres
+          register: pg_health
+          retries: 120
+          delay: 5
+          until: pg_health.stdout.strip() == 'healthy'
+          changed_when: false
+      rescue:
+        - name: Mostrar últimos logs de Postgres para diagnóstico
+          command: docker logs --tail 200 postgres
+          register: pg_logs
+          failed_when: false
+          changed_when: false
+        - name: Detectar error de directorio de datos existente y no vacío
+          set_fact:
+            pg_data_dir_not_empty: "{{ 'exists but is not empty' in (pg_logs.stdout | default('')) or 'exists but is not empty' in (pg_logs.stderr | default('')) }}"
+        - name: Depurar condición detectada
+          debug:
+            msg: "pg_data_dir_not_empty={{ pg_data_dir_not_empty | default(false) }}"
+        - name: Remediar volumen de Postgres corrupto (detener, eliminar contenedor y volumen, recrear)
+          block:
+            - name: Detener db
+              command: docker compose stop db
+              args:
+                chdir: /home/{{ ansible_user }}/
+              failed_when: false
+              changed_when: true
+            - name: Eliminar contenedor db
+              command: docker compose rm -f db
+              args:
+                chdir: /home/{{ ansible_user }}/
+              failed_when: false
+              changed_when: true
+            - name: Eliminar sólo el volumen postgresql_data
+              shell: |
+                docker volume rm -f postgresql_data || true
+              changed_when: true
+            - name: Crear explícitamente el volumen postgresql_data (si no existe)
+              command: docker volume create postgresql_data
+              register: vol_create
+              failed_when: false
+              changed_when: vol_create.rc == 0
+            - name: Limpiar cualquier residuo dentro del volumen postgresql_data
+              shell: |
+                docker run --rm -v postgresql_data:/var/lib/postgresql/data busybox sh -c "rm -rf /var/lib/postgresql/data/*"
+              register: vol_clean
+              failed_when: false
+              changed_when: true
+            - name: Recrear Postgres con volumen limpio
+              command: docker compose up -d --force-recreate db
+              args:
+                chdir: /home/{{ ansible_user }}/
+            - name: Verificar variables de entorno del contenedor postgres (diagnóstico PGDATA)
+              shell: docker inspect --format='{{"{{"}}range .Config.Env{{"}}"}}{{"{{"}}println .{{"}}"}}{{"{{"}}end{{"}}"}}' postgres | grep '^PGDATA=' || true
+              register: pg_env
+              changed_when: false
+              failed_when: false
+            - debug:
+                msg: "PGDATA en contenedor postgres: {{ pg_env.stdout | default('no encontrado') }}"
+          when: pg_data_dir_not_empty | default(false)
+        - block:
+            - name: Esperar nuevamente a que Postgres esté healthy (post-remediación)
+              shell: docker inspect --format='{{"{{"}} .State.Health.Status {{"}}"}}' postgres
+              register: pg_health2
+              retries: 60
+              delay: 5
+              until: pg_health2.stdout.strip() == 'healthy'
+              changed_when: false
+          rescue:
+            - name: Mostrar últimos logs de Postgres tras remediación
+              command: docker logs --tail 200 postgres
+              register: pg_logs2
+              failed_when: false
+              changed_when: false
+            - debug:
+                msg: "Logs de Postgres tras remediación (últimas 200 líneas):\n{{ pg_logs2.stdout | default('') }}\n{{ pg_logs2.stderr | default('') }}"
+            - name: Fallar explícitamente si Postgres no está healthy tras remediación
+              fail:
+                msg: "Postgres no alcanzó estado 'healthy' tras remediación. Revisa los logs impresos arriba."
+        - name: Fallar si no se realizó remediación y tampoco está healthy
+          when: not (pg_data_dir_not_empty | default(false))
+          fail:
+            msg: "Postgres no alcanzó estado 'healthy' y no aplica remediación automática. Revisa los logs mostrados."
+
+    - name: Levantar Jenkins
+      command: docker compose up -d --force-recreate jenkins
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+
+    - name: Esperar a que Jenkins esté escuchando en 8080
+      wait_for:
+        host: 127.0.0.1
+        port: 8080
+        delay: 2
+        timeout: 600
+    - name: Levantar SonarQube
+      command: docker compose up -d --force-recreate sonarqube
+      args:
+        chdir: /home/{{ ansible_user }}/
+      become: true
+
+    - block:
+        - name: Esperar a que SonarQube esté escuchando en 9000
+          wait_for:
+            host: 127.0.0.1
+            port: 9000
+            delay: 2
+            timeout: 900
+
+        - name: Esperar a que SonarQube quede operativo (docker health OR HTTP status=UP)
+          shell: |
+            set -e
+            # 1) Si existe Healthcheck en el contenedor y está healthy, aceptar
+            if docker inspect --format='{{"{{"}} .State.Health.Status {{"}}"}}' sonarqube 2>/dev/null | grep -qx healthy; then
+              exit 0
+            fi
+            # 2) Validación HTTP con redirecciones en /sonar o raíz
+            check() {
+              curl -sS -L -H 'Accept: application/json' http://127.0.0.1:9000/sonar/api/system/status | grep -q '"status":"UP"' && return 0
+              curl -sS -L -H 'Accept: application/json' http://127.0.0.1:9000/api/system/status | grep -q '"status":"UP"' && return 0
+              # Compatibilidad con endpoints antiguos de health
+              curl -sS -L -H 'Accept: application/json' http://127.0.0.1:9000/sonar/api/system/health | grep -q '"health":"GREEN"' && return 0
+              curl -sS -L -H 'Accept: application/json' http://127.0.0.1:9000/api/system/health | grep -q '"health":"GREEN"' && return 0
+              # Fallback muy laxo: la home debe contener "SonarQube"
+              curl -sS -L http://127.0.0.1:9000/ | grep -qi 'SonarQube' && return 0
+              curl -sS -L http://127.0.0.1:9000/sonar/ | grep -qi 'SonarQube' && return 0
+              return 1
+            }
+            check
+          register: sonar_ready
+          retries: 90
+          delay: 10
+          until: sonar_ready.rc == 0
+          changed_when: false
+      rescue:
+        - name: Mostrar últimos logs de SonarQube para diagnóstico
+          command: docker logs --tail 200 sonarqube
+          register: sonar_logs
+          failed_when: false
+          changed_when: false
+        - debug:
+            msg: "Logs de SonarQube (últimas 200 líneas):\n{{ sonar_logs.stdout | default('') }}\n{{ sonar_logs.stderr | default('') }}"
+        - name: Fallar explícitamente si SonarQube no alcanza estado saludable
+          fail:
+            msg: "SonarQube no alcanzó estado HEALTHY/UP dentro del tiempo esperado. Revisa los logs impresos arriba."
