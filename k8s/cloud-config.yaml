@@ -25,8 +25,24 @@ spec:
               value: http://zipkin:9411
             - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
               value: http://service-discovery:8761/eureka/
-            - name: EUREKA_CLIENT_SERVICEURL_MYZONE
-              value: http://service-discovery:8761/eureka
+            - name: SPRING_CLOUD_CONFIG_SERVER_GIT_CLONE_ON_START
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 9296
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 9296
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
@@ -41,4 +57,3 @@ spec:
       port: 9296
       targetPort: 9296
   type: ClusterIP
-
