@@ -1,22 +1,13 @@
-{% set jenkins_host = hostvars[groups['jenkins'][0]].inventory_hostname %}
+{% set ci_group = 'ci' if 'ci' in groups else ('CI' if 'CI' in groups else None) %}
+{% set ci_host = hostvars[groups[ci_group][0]].inventory_hostname if ci_group else '127.0.0.1' %}
 
 server {
     listen 80;
     server_name _;
 
-    # Proxy a Jenkins
+    # Raíz: redirige a SonarQube bajo /sonar/
     location / {
-        proxy_pass http://{{ jenkins_host }}:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        proxy_set_header Connection "";
-        proxy_buffering off;
-        proxy_read_timeout 300;
+        return 302 /sonar/;
     }
 
     # Proxy a SonarQube bajo /sonar/
@@ -28,8 +19,22 @@ server {
         proxy_set_header X-Forwarded-Port $server_port;
         proxy_set_header Host $host;
         proxy_read_timeout 300;
-        # Mantener /sonar/ -> /sonar/ en upstream
-        proxy_pass http://{{ jenkins_host }}:9000/sonar/;
+        proxy_pass http://{{ ci_host }}:9000/sonar/;
+        proxy_redirect off;
+    }
+}
+
+server {
+    listen 8089;
+    server_name _;
+
+    location / {
+        proxy_pass http://{{ ci_host }}:8089/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
         proxy_redirect off;
     }
 }

@@ -3,8 +3,8 @@ inInfraestructura con Terraform (Azure - Mexico Central)
 Resumen
 - Crea una red básica en Azure y un conjunto de VMs Linux (Ubuntu 20.04 LTS Gen2) cuyo nombre proviene de la lista variable "servers".
 - Cada VM es Standard_B2s (límite compatible con Azure Student) y recibe IP pública estática (SKU Standard).
-- Reglas NSG preconfiguradas para facilitar el uso de CI/CD: SSH (22), HTTP (80), HTTPS (443), Jenkins (8080), SonarQube (9000) y Kubernetes API (6443).
-- Pensado para que luego configures las VMs con Ansible (instalación de Docker, Jenkins, SonarQube, Helm/K3s, etc.).
+- Reglas NSG preconfiguradas para facilitar el uso de CI/CD: SSH (22), HTTP (80), HTTPS (443), SonarQube (9000), Locust (8089) y Kubernetes API (6443).
+- Pensado para que luego configures las VMs con Ansible (instalación de Docker, SonarQube, Helm/K3s, etc.).
 
 Estructura
 - main.tf: RG, VNet, Subnet y consumo del módulo de VMs.
@@ -44,13 +44,13 @@ Qué se crea
   - NIC: <server>-nic
   - VM Linux (Ubuntu 20.04 LTS Gen2): <server>-machine (tamaño Standard_B2s)
 - NSG común (<prefix>-sg) con reglas de entrada:
-  - 22 (SSH), 80 (HTTP), 443 (HTTPS), 8080 (Jenkins), 9000 (SonarQube), 6443 (Kubernetes API)
+  - 22 (SSH), 80 (HTTP), 443 (HTTPS), 9000 (SonarQube), 8089 (Locust), 6443 (Kubernetes API)
 
 Seguridad y mínimo privilegio
 - De fábrica, las reglas permiten acceso desde cualquier origen (0.0.0.0/0) para facilitar pruebas del taller.
 - Para endurecer (recomendado):
   - Restringe SSH (22) a tu IP pública (X.X.X.X/32).
-  - Si usarás Jenkins/Sonar/Ingress solo en la VM "ci", considera mover reglas por VM o separar NSGs.
+  - Si usarás Sonar/Ingress/Locust solo en la VM "ci", considera mover reglas por VM o separar NSGs.
   - Puedes ajustar las reglas en `modules/vm/main.tf` antes de aplicar.
 
 Cómo desplegar (Windows cmd)
@@ -108,6 +108,5 @@ Notas y troubleshooting
 - Puertos no accesibles: comprueba que la IP pública corresponda a la VM esperada y que las reglas NSG estén aplicadas.
 
 Siguientes pasos (sugerencias)
-- Instalar en la VM "ci" con Ansible: Docker, Jenkins (8080), SonarQube (9000) con Postgres, y un cluster ligero (K3s) + Helm para despliegue.
+- Instalar en la VM "ci" con Ansible: Docker, SonarQube (9000) con Postgres, Locust (8089), y un cluster ligero (K3s) + Helm para despliegue.
 - Opcional: cerrar puertos no usados y exponer solo los necesarios a Internet; usar un Ingress Controller en la VM "ci" si vas a publicar endpoints HTTP/HTTPS.
-
