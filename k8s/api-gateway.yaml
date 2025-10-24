@@ -27,7 +27,17 @@ spec:
               value: optional:configserver:http://cloud-config:9296/
             - name: SPRING_CLOUD_CONFIG_URI
               value: http://cloud-config:9296
+            # Precedencia: permitir que el entorno/local pise la config remota
+            - name: SPRING_CLOUD_CONFIG_ALLOW_OVERRIDE
+              value: "true"
+            - name: SPRING_CLOUD_CONFIG_OVERRIDE_NONE
+              value: "true"
+            - name: SPRING_CLOUD_CONFIG_OVERRIDE_SYSTEM_PROPERTIES
+              value: "false"
+            # Forzar Eureka a usar el Service interno en Kubernetes
             - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: http://service-discovery:8761/eureka/
+            - name: EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE
               value: http://service-discovery:8761/eureka/
             - name: EUREKA_CLIENT_REGISTER_WITH_EUREKA
               value: "true"
@@ -46,5 +56,5 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
-  type: ClusterIP
-
+      nodePort: 30080
+  type: NodePort
