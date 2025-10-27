@@ -64,7 +64,7 @@ jobs:
       - name: Create kind cluster
         run: |
           kind create cluster --name dev-e2e --wait 120s
-          kubectl version --short
+          kubectl version --client -o yaml
           kubectl get nodes -o wide
 
       - name: Apply manifests (kustomize)
