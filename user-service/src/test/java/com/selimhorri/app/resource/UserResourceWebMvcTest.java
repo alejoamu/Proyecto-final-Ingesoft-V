@@ -6,6 +6,8 @@ import org.mockito.BDDMockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Collections;
@@ -14,6 +16,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(UserResource.class)
+@ActiveProfiles("test")
+@TestPropertySource(properties = {
+        "spring.config.import=",
+        "spring.cloud.config.enabled=false",
+        "eureka.client.enabled=false",
+        "eureka.client.register-with-eureka=false",
+        "eureka.client.fetch-registry=false"
+})
 class UserResourceWebMvcTest {
 
     @Autowired
@@ -29,4 +39,3 @@ class UserResourceWebMvcTest {
                 .andExpect(status().isOk());
     }
 }
-
