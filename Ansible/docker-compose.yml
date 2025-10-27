@@ -105,7 +105,14 @@ services:
       - K3S_KUBECONFIG_MODE=644
     ports:
       - "6443:6443"
-      - "8080:30080" # expone NodePort 30080 (API Gateway) en 8080 del host
+      - "8080:30080"   # API Gateway
+      - "8300:30300"   # order-service
+      - "8400:30400"   # payment-service
+      - "8500:30500"   # product-service
+      - "8600:30600"   # shipping-service
+      - "8700:30700"   # user-service
+      - "8800:30800"   # favourite-service
+      - "8900:30900"   # proxy-client
     volumes:
       - k3s-data:/var/lib/rancher/k3s
       - ./k3s:/output
