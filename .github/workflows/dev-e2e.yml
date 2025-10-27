@@ -76,27 +76,61 @@ jobs:
       - name: Wait for deployments Ready
         run: |
           set -e
-          # Esperar hasta 240s por todos los deployments
-          kubectl -n ecommerce wait --for=condition=available --timeout=240s deployment --all
+          # Esperar hasta 360s por todos los deployments
+          kubectl -n ecommerce wait --for=condition=available --timeout=360s deployment --all
+          # Y esperar hasta 360s por todos los pods Ready
+          kubectl -n ecommerce wait --for=condition=ready --timeout=360s pod --all
           kubectl -n ecommerce get pods -o wide
 
       - name: Port-forward services to localhost
         run: |
-          # Lanzar port-forwards en background
-          nohup kubectl -n ecommerce port-forward svc/product-service 8500:8500 >/dev/null 2>&1 & echo $! > pf_product.pid
-          nohup kubectl -n ecommerce port-forward svc/user-service 8700:8700 >/dev/null 2>&1 & echo $! > pf_user.pid
-          nohup kubectl -n ecommerce port-forward svc/shipping-service 8600:8600 >/dev/null 2>&1 & echo $! > pf_shipping.pid
-          nohup kubectl -n ecommerce port-forward svc/payment-service 8400:8400 >/dev/null 2>&1 & echo $! > pf_payment.pid
-          nohup kubectl -n ecommerce port-forward svc/order-service 8300:8300 >/dev/null 2>&1 & echo $! > pf_order.pid
-          nohup kubectl -n ecommerce port-forward svc/favourite-service 8800:8800 >/dev/null 2>&1 & echo $! > pf_favourite.pid
-          sleep 5
+          set -e
+          # Obtiene el primer pod por etiqueta app
+          pod_of() { kubectl -n "$1" get pod -l app="$2" -o jsonpath='{.items[0].metadata.name}'; }
+
+          P_PRODUCT=$(pod_of ecommerce product-service)
+          P_USER=$(pod_of ecommerce user-service)
+          P_SHIP=$(pod_of ecommerce shipping-service)
+          P_PAY=$(pod_of ecommerce payment-service)
+          P_ORDER=$(pod_of ecommerce order-service)
+          P_FAV=$(pod_of ecommerce favourite-service)
+
+          echo "PF -> product-service: $P_PRODUCT, user-service: $P_USER, shipping: $P_SHIP, payment: $P_PAY, order: $P_ORDER, favourite: $P_FAV"
+
+          # Lanzar port-forwards a pods en background
+          nohup kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/dev/null 2>&1 & echo $! > pf_product.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_USER 8700:8700 >/dev/null 2>&1 & echo $! > pf_user.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_SHIP 8600:8600 >/dev/null 2>&1 & echo $! > pf_shipping.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_PAY 8400:8400 >/dev/null 2>&1 & echo $! > pf_payment.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_ORDER 8300:8300 >/dev/null 2>&1 & echo $! > pf_order.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_FAV 8800:8800 >/dev/null 2>&1 & echo $! > pf_favourite.pid
+          sleep 300 # Esperar un poco a que los port-forwards estén activos
 
       - name: Warm-up and readiness checks (retry)
         run: |
           set -e
           retry() { for i in $(seq 1 24); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
-          retry http://localhost:8500/product-service/api/products
-          retry http://localhost:8700/user-service/api/users
+
+          if ! retry http://localhost:8500/product-service/api/products; then
+            echo "DIAGNOSTICO: estado de product-service";
+            kubectl -n ecommerce get svc product-service -o yaml || true
+            kubectl -n ecommerce get endpoints product-service -o wide || true
+            kubectl -n ecommerce get pod -l app=product-service -o wide || true
+            P_PRODUCT=$(kubectl -n ecommerce get pod -l app=product-service -o jsonpath='{.items[0].metadata.name}' || true)
+            [ -n "$P_PRODUCT" ] && kubectl -n ecommerce logs "$P_PRODUCT" --tail=200 || true
+            exit 1
+          fi
+
+          if ! retry http://localhost:8700/user-service/api/users; then
+            echo "DIAGNOSTICO: estado de user-service";
+            kubectl -n ecommerce get svc user-service -o yaml || true
+            kubectl -n ecommerce get endpoints user-service -o wide || true
+            kubectl -n ecommerce get pod -l app=user-service -o wide || true
+            P_USER=$(kubectl -n ecommerce get pod -l app=user-service -o jsonpath='{.items[0].metadata.name}' || true)
+            [ -n "$P_USER" ] && kubectl -n ecommerce logs "$P_USER" --tail=200 || true
+            exit 1
+          fi
+
           # Los siguientes pueden depender de otros servicios; intentamos pero no fallamos la preparación si devuelven !=200
           curl -fsS http://localhost:8600/shipping-service/api/shippings || true
           curl -fsS http://localhost:8400/payment-service/api/payments || true
