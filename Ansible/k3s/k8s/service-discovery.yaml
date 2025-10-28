@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-discovery
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-discovery
+  template:
+    metadata:
+      labels:
+        app: service-discovery
+    spec:
+      containers:
+        - name: service-discovery
+          image: selimhorri/service-discovery-ecommerce-boot:0.1.0
+          ports:
+            - containerPort: 8761
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: dev
+            - name: SPRING_ZIPKIN_BASE_URL
+              value: http://zipkin:9411
+            # Desactivar Cloud Config remoto
+            - name: SPRING_CLOUD_CONFIG_ENABLED
+              value: "false"
+            # Configuración típica de Eureka Server standalone
+            - name: EUREKA_CLIENT_REGISTER_WITH_EUREKA
+              value: "false"
+            - name: EUREKA_CLIENT_FETCH_REGISTRY
+              value: "false"
+            # Forzar hostname/IP por claridad (opcional)
+            - name: EUREKA_INSTANCE_PREFER_IP_ADDRESS
+              value: "true"
+            - name: EUREKA_INSTANCE_IP_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-discovery
+  namespace: ecommerce
+spec:
+  selector:
+    app: service-discovery
+  ports:
+    - name: http
+      port: 8761
+      targetPort: 8761
+  type: ClusterIP
