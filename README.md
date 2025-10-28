@@ -657,3 +657,119 @@ If you would like to enhance, please:
 - Finally, give it a 🌟.
 
 *Happy Coding ...* 🙂
+
+## Guía rápida (Quickstart)
+
+- Requisitos mínimos (local):
+  - Docker Desktop 4.x
+  - Java 11 (JDK)
+  - Maven (o usa `./mvnw` del repo)
+  - Opcional K8s: kubectl + kind
+
+### A. Ejecutar con Docker Compose
+1) Arranca los servicios core (Eureka, Config, Zipkin):
+   - Linux/macOS:
+     - `docker-compose -f core.yml up -d`
+   - Windows (CMD):
+     - `docker-compose -f core.yml up -d`
+2) Arranca el resto:
+   - `docker-compose -f compose.yml up -d`
+3) Endpoints útiles (con context-path):
+   - Product: http://localhost:8500/product-service/api/products
+   - User: http://localhost:8700/user-service/api/users
+   - Order: http://localhost:8300/order-service/api/orders
+   - Payment: http://localhost:8400/payment-service/api/payments
+   - Shipping: http://localhost:8600/shipping-service/api/shippings
+   - Favourite: http://localhost:8800/favourite-service/api/favourites
+
+Tips Windows:
+- `run-all.cmd` para iniciar todo; `stop-all.cmd` para detener.
+
+### B. Ejecutar en Kubernetes (kind)
+1) Crea un cluster kind:
+   - `kind create cluster --name dev-e2e --wait 120s`
+2) Aplica los manifiestos:
+   - `kubectl apply -k k8s`
+3) Espera readiness:
+   - `kubectl -n ecommerce wait --for=condition=available --timeout=360s deployment --all`
+   - `kubectl -n ecommerce wait --for=condition=ready --timeout=360s pod --all`
+4) Port-forward a Pods (en bash):
+   - Obtén nombres de pods: `kubectl -n ecommerce get pods -o wide`
+   - Abre forwards (consola 1):
+     - `kubectl -n ecommerce port-forward pod/<product-pod> 8500:8500`
+   - Abre forwards (consola 2):
+     - `kubectl -n ecommerce port-forward pod/<user-pod> 8700:8700`
+   - Repite para: shipping 8600, payment 8400, order 8300, favourite 8800.
+5) Verifica endpoints (mismos que en Compose).
+
+## Pruebas de carga (Locust) en local
+- Instala dependencias:
+  - `python -m pip install -r tests/locust/requirements.txt`
+- Asegúrate de tener los port-forward activos (ver sección K8s) o servicios en localhost.
+- Ejecuta Locust en modo headless (1 minuto, 50 usuarios):
+  - `python -m locust -f tests/locust/locustfile.py --host http://localhost --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results`
+- Reportes generados:
+  - `locust-report.html` + `locust-results*.csv`.
+
+Notas importantes de rutas
+- Los microservicios exponen context-path:
+  - Product: `/product-service`, User: `/user-service`, Shipping: `/shipping-service`, etc.
+- Los endpoints inician con `/api/...` tras el context-path.
+
+## Workflows de CI en GitHub Actions
+
+### 1) E2E - Locust on kind
+- Ubicación: `.github/workflows/locust-e2e.yml`.
+- Qué hace:
+  - Crea un cluster kind, aplica `k8s`, espera readiness.
+  - Port-forward a Pods y warm-up de Product/User.
+  - Ejecuta Locust headless (reportes como artifacts).
+- Cómo lanzarlo:
+  - En PR/push a `dev` o manual (workflow_dispatch).
+
+### 2) CI + E2E + Locust + Pages
+- Ubicación: `.github/workflows/ci-all-pages.yml`.
+- Qué hace:
+  - Compila y ejecuta tests (Surefire) y empaca reportes en `site/`.
+  - E2E con kind + Locust; añade resultados a `site/e2e` y `site/locust`.
+  - Sube el sitio como artifact para GitHub Pages.
+- Despliegue a Pages:
+  - Para publicar en Pages, ver sección siguiente.
+
+## Activar GitHub Pages (paso a paso)
+1) En tu repo GitHub: Settings > Pages.
+   - En “Build and deployment” > Source: selecciona “GitHub Actions”.
+2) Configura el environment protegido (opcional pero recomendado):
+   - Settings > Environments > `github-pages`.
+   - En “Deployment branches”, permite `main`/`master` (o las ramas que quieras permitir).
+   - Si tienes “Required reviewers”, desactívalo para auto-deploy o configura revisores.
+3) Permisos de Actions (si tu org los restringe):
+   - Settings > Actions > General > “Workflow permissions”: habilita “Read and write permissions”.
+4) Ejecuta el workflow de `CI + E2E + Locust + Pages` con push a `main`/`master`.
+   - El job de deploy publicará el contenido de `site/` a Pages.
+5) Verifica la URL en Settings > Pages o en la salida del job (page_url).
+
+Sugerencia: Si trabajas en `dev`, puedes revisar los artifacts generados (site.zip) sin publicar a Pages.
+
+## Solución de problemas
+- “Connection refused” durante port-forward:
+  - Asegura que el Pod está Ready: `kubectl -n ecommerce get pods`.
+  - Espera un poco más tras abrir el forward (los workflows usan un sleep amplio).
+  - Revisa logs: `kubectl -n ecommerce logs <pod> --tail=200`.
+- Rutas 404:
+  - Verifica el context-path (p.ej. `/product-service/api/products`).
+- Locust exige host base:
+  - Usa `--host http://localhost` (el workflow ya lo incluye) o define `BASE_HOST`.
+
+## Referencias rápidas
+- Crear cluster kind: `kind create cluster --name dev-e2e --wait 120s`
+- Aplicar Kustomize: `kubectl apply -k k8s`
+- Esperar readiness: `kubectl -n ecommerce wait --for=condition=available --timeout=360s deployment --all`
+- Port-forward (ejemplo): `kubectl -n ecommerce port-forward pod/<product-pod> 8500:8500`
+- Endpoints clave:
+  - Product: `GET /product-service/api/products`
+  - User: `GET /user-service/api/users`
+  - Order: `GET /order-service/api/orders`
+  - Payment: `GET /payment-service/api/payments`
+  - Shipping: `GET /shipping-service/api/shippings`
+  - Favourite: `GET /favourite-service/api/favourites`
