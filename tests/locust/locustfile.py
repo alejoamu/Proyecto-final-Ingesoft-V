@@ -3,6 +3,14 @@ import os
 
 BASE_HOST = os.getenv("BASE_HOST", "http://localhost")
 
+# Endpoints configurables por entorno; por defecto usamos NodePort
+PRODUCT_URL = os.getenv("PRODUCT_URL", "http://localhost:30500/api/products")
+USER_URL = os.getenv("USER_URL", "http://localhost:30700/api/users")
+SHIPPING_URL = os.getenv("SHIPPING_URL", "http://localhost:30600/api/shippings")
+PAYMENT_URL = os.getenv("PAYMENT_URL", "http://localhost:30400/api/payments")
+ORDER_URL = os.getenv("ORDER_URL", "http://localhost:30300/api/orders")
+FAVOURITE_URL = os.getenv("FAVOURITE_URL", "http://localhost:30800/api/favourites")
+
 class EcommerceUser(HttpUser):
     # Locust exige un host base aunque usemos URLs absolutas; esto lo satisface
     host = BASE_HOST
@@ -10,39 +18,37 @@ class EcommerceUser(HttpUser):
 
     @task(3)
     def products_list(self):
-        # product-service exposed locally via port-forward 8500
-        self.client.get("http://localhost:8500/api/products", name="GET /products")
+        self.client.get(PRODUCT_URL, name="GET /products")
 
     @task(3)
     def users_list(self):
-        # user-service exposed locally via port-forward 8700
-        self.client.get("http://localhost:8700/api/users", name="GET /users")
+        self.client.get(USER_URL, name="GET /users")
 
     # Optional smoke hits to other services if they are up; don't dominate load
     @task(1)
     def shipping_list(self):
         try:
-            self.client.get("http://localhost:8600/api/shippings", name="GET /shippings", timeout=5)
+            self.client.get(SHIPPING_URL, name="GET /shippings", timeout=5)
         except Exception:
             pass
 
     @task(1)
     def payments_list(self):
         try:
-            self.client.get("http://localhost:8400/api/payments", name="GET /payments", timeout=5)
+            self.client.get(PAYMENT_URL, name="GET /payments", timeout=5)
         except Exception:
             pass
 
     @task(1)
     def orders_list(self):
         try:
-            self.client.get("http://localhost:8300/api/orders", name="GET /orders", timeout=5)
+            self.client.get(ORDER_URL, name="GET /orders", timeout=5)
         except Exception:
             pass
 
     @task(1)
     def favourites_list(self):
         try:
-            self.client.get("http://localhost:8800/api/favourites", name="GET /favourites", timeout=5)
+            self.client.get(FAVOURITE_URL, name="GET /favourites", timeout=5)
         except Exception:
             pass

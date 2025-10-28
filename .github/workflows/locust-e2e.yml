@@ -83,11 +83,18 @@ jobs:
             wait_ep "$s"
           done
 
-      - name: Port-forward Pods (background)
+      - name: Port-forward, warmup and run Locust
+        env:
+          PRODUCT_URL: http://localhost:8500/api/products
+          USER_URL: http://localhost:8700/api/users
+          SHIPPING_URL: http://localhost:8600/api/shippings
+          PAYMENT_URL: http://localhost:8400/api/payments
+          ORDER_URL: http://localhost:8300/api/orders
+          FAVOURITE_URL: http://localhost:8800/api/favourites
         run: |
           set -e
+          # Resolve Pods in Running state
           pod_of() {
-            # pick the latest Running pod for the app label
             kubectl -n ecommerce get pods -l app="$1" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | tail -n 1
           }
           P_PRODUCT=$(pod_of product-service)
@@ -96,25 +103,18 @@ jobs:
           P_PAY=$(pod_of payment-service)
           P_ORDER=$(pod_of order-service)
           P_FAV=$(pod_of favourite-service)
-          echo "PF -> product-service: $P_PRODUCT, user-service: $P_USER, shipping: $P_SHIP, payment: $P_PAY, order: $P_ORDER, favourite: $P_FAV"
+          echo "PF -> product: $P_PRODUCT, user: $P_USER, ship: $P_SHIP, pay: $P_PAY, order: $P_ORDER, fav: $P_FAV"
 
-          # Start port-forwards to pods
-          nohup kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/tmp/pf_product.log 2>&1 & echo $! > /tmp/pf_product.pid
-          nohup kubectl -n ecommerce port-forward pod/$P_USER 8700:8700     >/tmp/pf_user.log    2>&1 & echo $! > /tmp/pf_user.pid
-          nohup kubectl -n ecommerce port-forward pod/$P_SHIP 8600:8600     >/tmp/pf_shipping.log 2>&1 & echo $! > /tmp/pf_shipping.pid
-          nohup kubectl -n ecommerce port-forward pod/$P_PAY 8400:8400      >/tmp/pf_payment.log 2>&1 & echo $! > /tmp/pf_payment.pid
-          nohup kubectl -n ecommerce port-forward pod/$P_ORDER 8300:8300    >/tmp/pf_order.log   2>&1 & echo $! > /tmp/pf_order.pid
-          nohup kubectl -n ecommerce port-forward pod/$P_FAV 8800:8800      >/tmp/pf_favourite.log 2>&1 & echo $! > /tmp/pf_favourite.pid
+          # Start port-forwards to Pods in background and ensure cleanup
+          kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/tmp/pf-product.log 2>&1 & PF_PRODUCT=$!
+          kubectl -n ecommerce port-forward pod/$P_USER    8700:8700 >/tmp/pf-user.log    2>&1 & PF_USER=$!
+          kubectl -n ecommerce port-forward pod/$P_SHIP    8600:8600 >/tmp/pf-ship.log    2>&1 & PF_SHIP=$!
+          kubectl -n ecommerce port-forward pod/$P_PAY     8400:8400 >/tmp/pf-pay.log     2>&1 & PF_PAY=$!
+          kubectl -n ecommerce port-forward pod/$P_ORDER   8300:8300 >/tmp/pf-order.log   2>&1 & PF_ORDER=$!
+          kubectl -n ecommerce port-forward pod/$P_FAV     8800:8800 >/tmp/pf-fav.log     2>&1 & PF_FAV=$!
+          trap 'set +e; kill $PF_PRODUCT $PF_USER $PF_SHIP $PF_PAY $PF_ORDER $PF_FAV 2>/dev/null || true; sleep 1; for f in /tmp/pf-*.log; do echo "==== $f ====\n"; tail -n 50 "$f" || true; done' EXIT
 
-          # Give port-forwarders time to attach
-          sleep 30
-
-          echo "Port-forwarders started. Logs (last 20 lines if any):"
-          for f in /tmp/pf_*.log; do echo "==== $f ===="; tail -n 20 "$f" || true; done
-
-      - name: Wait for local ports open
-        run: |
-          set -e
+          # Wait ports to be open
           wait_port() {
             host=$1; port=$2; label=$3
             for i in $(seq 1 60); do
@@ -125,26 +125,19 @@ jobs:
           }
           wait_port 127.0.0.1 8500 product-service
           wait_port 127.0.0.1 8700 user-service
-          # Best-effort for the rest
-          (echo > /dev/tcp/127.0.0.1/8600) >/dev/null 2>&1 || true
-          (echo > /dev/tcp/127.0.0.1/8400) >/dev/null 2>&1 || true
-          (echo > /dev/tcp/127.0.0.1/8300) >/dev/null 2>&1 || true
-          (echo > /dev/tcp/127.0.0.1/8800) >/dev/null 2>&1 || true
 
-      - name: Warmup API endpoints
-        run: |
-          set -e
+          # Warmup endpoints (retry)
           retry() { for i in $(seq 1 60); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
-          retry http://localhost:8500/api/products
-          retry http://localhost:8700/api/users
+          retry "$PRODUCT_URL"
+          retry "$USER_URL"
           # Best effort warmups (don't fail pipeline)
-          curl -fsS http://localhost:8600/api/shippings || true
-          curl -fsS http://localhost:8400/api/payments || true
-          curl -fsS http://localhost:8300/api/orders || true
-          curl -fsS http://localhost:8800/api/favourites || true
+          curl -fsS "$SHIPPING_URL"  || true
+          curl -fsS "$PAYMENT_URL"   || true
+          curl -fsS "$ORDER_URL"     || true
+          curl -fsS "$FAVOURITE_URL" || true
 
-      - name: Run Locust (headless)
-        run: |
+          # Run Locust (headless)
+          BASE_HOST=http://localhost \
           python -m locust -f tests/locust/locustfile.py --host http://localhost --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
 
       - name: Upload Locust report
@@ -162,15 +155,8 @@ jobs:
           kubectl -n ecommerce get pods -o wide
           kubectl -n ecommerce get svc -o wide
           kubectl -n ecommerce get endpoints -o wide
-          echo "--- product-service logs (last 100) ---"
-          kubectl -n ecommerce logs deploy/product-service --tail=100 || true
-          echo "--- user-service logs (last 100) ---"
-          kubectl -n ecommerce logs deploy/user-service --tail=100 || true
-          for f in /tmp/pf_*.log; do echo "==== $f ===="; tail -n +1 "$f"; done
 
       - name: Teardown
         if: always()
         run: |
-          set +e
-          for pid in /tmp/pf_*.pid; do [ -f "$pid" ] && kill $(cat "$pid") 2>/dev/null || true; done
           kind delete cluster --name dev-e2e
