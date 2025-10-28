@@ -39,7 +39,6 @@ jobs:
 
       - name: Apply K8s manifests
         run: |
-          # Apply namespace-scoped resources
           kubectl -n ecommerce apply -f k8s/service-discovery.yaml
           kubectl -n ecommerce apply -f k8s/cloud-config.yaml
           kubectl -n ecommerce apply -f k8s/zipkin.yaml || true
@@ -57,7 +56,7 @@ jobs:
           set -e
           for d in service-discovery cloud-config; do
             echo "Waiting for $d"
-            kubectl -n ecommerce rollout status deploy/$d --timeout=240s || kubectl -n ecommerce get pods -o wide
+            kubectl -n ecommerce rollout status deploy/$d --timeout=300s || kubectl -n ecommerce get pods -o wide
           done
 
       - name: Wait for apps
@@ -65,7 +64,7 @@ jobs:
           set -e
           for d in user-service product-service order-service payment-service shipping-service favourite-service; do
             echo "Waiting for $d"
-            kubectl -n ecommerce rollout status deploy/$d --timeout=300s || kubectl -n ecommerce get pods -o wide
+            kubectl -n ecommerce rollout status deploy/$d --timeout=360s || kubectl -n ecommerce get pods -o wide
           done
 
       - name: Wait for service endpoints
@@ -74,7 +73,7 @@ jobs:
           wait_ep() {
             svc=$1
             for i in $(seq 1 60); do
-              ready=$(kubectl -n ecommerce get endpoints "$svc" -o jsonpath='{.subsets[*].addresses[*].ip}' || true)
+              ready=$(kubectl -n ecommerce get endpoints "$svc" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
               if [ -n "$ready" ]; then echo "Endpoints ready for $svc: $ready"; return 0; fi
               echo "[$i/60] waiting endpoints for $svc"; sleep 5
             done
@@ -84,19 +83,55 @@ jobs:
             wait_ep "$s"
           done
 
-      - name: Port-forward Services
+      - name: Port-forward Pods (background)
         run: |
           set -e
-          # Forward service ports to localhost matching each service's internal port
-          kubectl -n ecommerce port-forward svc/product-service 8500:8500 >/tmp/pf-product.log 2>&1 & echo $! > /tmp/pf-product.pid
-          kubectl -n ecommerce port-forward svc/user-service 8700:8700   >/tmp/pf-user.log    2>&1 & echo $! > /tmp/pf-user.pid
-          kubectl -n ecommerce port-forward svc/shipping-service 8600:8600 >/tmp/pf-ship.log   2>&1 & echo $! > /tmp/pf-ship.pid
-          kubectl -n ecommerce port-forward svc/payment-service 8400:8400 >/tmp/pf-pay.log    2>&1 & echo $! > /tmp/pf-pay.pid
-          kubectl -n ecommerce port-forward svc/order-service 8300:8300   >/tmp/pf-order.log  2>&1 & echo $! > /tmp/pf-order.pid
-          kubectl -n ecommerce port-forward svc/favourite-service 8800:8800 >/tmp/pf-fav.log  2>&1 & echo $! > /tmp/pf-fav.pid
-          sleep 5
+          pod_of() {
+            # pick the latest Running pod for the app label
+            kubectl -n ecommerce get pods -l app="$1" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | tail -n 1
+          }
+          P_PRODUCT=$(pod_of product-service)
+          P_USER=$(pod_of user-service)
+          P_SHIP=$(pod_of shipping-service)
+          P_PAY=$(pod_of payment-service)
+          P_ORDER=$(pod_of order-service)
+          P_FAV=$(pod_of favourite-service)
+          echo "PF -> product-service: $P_PRODUCT, user-service: $P_USER, shipping: $P_SHIP, payment: $P_PAY, order: $P_ORDER, favourite: $P_FAV"
 
-      - name: Warmup endpoints
+          # Start port-forwards to pods
+          nohup kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/tmp/pf_product.log 2>&1 & echo $! > /tmp/pf_product.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_USER 8700:8700     >/tmp/pf_user.log    2>&1 & echo $! > /tmp/pf_user.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_SHIP 8600:8600     >/tmp/pf_shipping.log 2>&1 & echo $! > /tmp/pf_shipping.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_PAY 8400:8400      >/tmp/pf_payment.log 2>&1 & echo $! > /tmp/pf_payment.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_ORDER 8300:8300    >/tmp/pf_order.log   2>&1 & echo $! > /tmp/pf_order.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_FAV 8800:8800      >/tmp/pf_favourite.log 2>&1 & echo $! > /tmp/pf_favourite.pid
+
+          # Give port-forwarders time to attach
+          sleep 30
+
+          echo "Port-forwarders started. Logs (last 20 lines if any):"
+          for f in /tmp/pf_*.log; do echo "==== $f ===="; tail -n 20 "$f" || true; done
+
+      - name: Wait for local ports open
+        run: |
+          set -e
+          wait_port() {
+            host=$1; port=$2; label=$3
+            for i in $(seq 1 60); do
+              if (echo > /dev/tcp/$host/$port) >/dev/null 2>&1; then echo "Port open: $label ($host:$port)"; return 0; fi
+              echo "[$i/60] waiting for $label ($host:$port)"; sleep 2
+            done
+            echo "ERROR: port not open: $label ($host:$port)"; exit 1
+          }
+          wait_port 127.0.0.1 8500 product-service
+          wait_port 127.0.0.1 8700 user-service
+          # Best-effort for the rest
+          (echo > /dev/tcp/127.0.0.1/8600) >/dev/null 2>&1 || true
+          (echo > /dev/tcp/127.0.0.1/8400) >/dev/null 2>&1 || true
+          (echo > /dev/tcp/127.0.0.1/8300) >/dev/null 2>&1 || true
+          (echo > /dev/tcp/127.0.0.1/8800) >/dev/null 2>&1 || true
+
+      - name: Warmup API endpoints
         run: |
           set -e
           retry() { for i in $(seq 1 60); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
@@ -127,11 +162,15 @@ jobs:
           kubectl -n ecommerce get pods -o wide
           kubectl -n ecommerce get svc -o wide
           kubectl -n ecommerce get endpoints -o wide
-          for f in /tmp/pf-*.log; do echo "==== $f ===="; tail -n +1 "$f"; done
+          echo "--- product-service logs (last 100) ---"
+          kubectl -n ecommerce logs deploy/product-service --tail=100 || true
+          echo "--- user-service logs (last 100) ---"
+          kubectl -n ecommerce logs deploy/user-service --tail=100 || true
+          for f in /tmp/pf_*.log; do echo "==== $f ===="; tail -n +1 "$f"; done
 
       - name: Teardown
         if: always()
         run: |
           set +e
-          for pid in /tmp/pf-*.pid; do [ -f "$pid" ] && kill $(cat "$pid") 2>/dev/null || true; done
+          for pid in /tmp/pf_*.pid; do [ -f "$pid" ] && kill $(cat "$pid") 2>/dev/null || true; done
           kind delete cluster --name dev-e2e
