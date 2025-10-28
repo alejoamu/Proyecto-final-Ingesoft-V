@@ -1,4 +1,4 @@
-name: Dev E2E - Locust
+name: E2E - Locust on kind
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
 jobs:
   e2e-locust:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -27,63 +27,95 @@ jobs:
           python -m pip install -r tests/locust/requirements.txt
           python -c "import locust, sys; print('Locust:', locust.__version__)"
 
-      - name: Create kind cluster
-        uses: helm/kind-action@v1.9.0
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
         with:
-          cluster_name: dev-e2e
-          node_image: kindest/node:v1.30.0
+          version: latest
 
-      - name: Create namespace
+      - name: Install kind
+        uses: helm/kind-action@v1.10.0
+        with:
+          version: v0.23.0
+
+      - name: Create kind cluster
         run: |
-          kubectl get ns ecommerce || kubectl create ns ecommerce
+          kind create cluster --name dev-e2e --wait 120s
+          kubectl version --client -o yaml
+          kubectl get nodes -o wide
 
-      - name: Apply K8s manifests
+      - name: Apply manifests (kustomize)
         run: |
-          kubectl -n ecommerce apply -f k8s/service-discovery.yaml
-          kubectl -n ecommerce apply -f k8s/cloud-config.yaml
-          kubectl -n ecommerce apply -f k8s/zipkin.yaml || true
-          kubectl -n ecommerce apply -f k8s/api-gateway.yaml || true
-          kubectl -n ecommerce apply -f k8s/user-service.yaml
-          kubectl -n ecommerce apply -f k8s/product-service.yaml
-          kubectl -n ecommerce apply -f k8s/order-service.yaml
-          kubectl -n ecommerce apply -f k8s/payment-service.yaml
-          kubectl -n ecommerce apply -f k8s/shipping-service.yaml
-          kubectl -n ecommerce apply -f k8s/favourite-service.yaml
-          kubectl -n ecommerce apply -f k8s/proxy-client.yaml || true
+          kubectl apply -k k8s
+          # Esperar namespace
+          kubectl get ns ecommerce
 
-      - name: Wait for core infra
+      - name: Wait for deployments Ready
         run: |
           set -e
-          for d in service-discovery cloud-config; do
-            echo "Waiting for $d"
-            kubectl -n ecommerce rollout status deploy/$d --timeout=300s || kubectl -n ecommerce get pods -o wide
-          done
+          # Esperar hasta 360s por todos los deployments
+          kubectl -n ecommerce wait --for=condition=available --timeout=360s deployment --all
+          # Y esperar hasta 360s por todos los pods Ready
+          kubectl -n ecommerce wait --for=condition=ready --timeout=360s pod --all
+          kubectl -n ecommerce get pods -o wide
 
-      - name: Wait for apps
+      - name: Port-forward services to localhost
         run: |
           set -e
-          for d in user-service product-service order-service payment-service shipping-service favourite-service; do
-            echo "Waiting for $d"
-            kubectl -n ecommerce rollout status deploy/$d --timeout=360s || kubectl -n ecommerce get pods -o wide
-          done
+          # Obtiene el primer pod por etiqueta app
+          pod_of() { kubectl -n "$1" get pod -l app="$2" -o jsonpath='{.items[0].metadata.name}'; }
 
-      - name: Wait for service endpoints
+          P_PRODUCT=$(pod_of ecommerce product-service)
+          P_USER=$(pod_of ecommerce user-service)
+          P_SHIP=$(pod_of ecommerce shipping-service)
+          P_PAY=$(pod_of ecommerce payment-service)
+          P_ORDER=$(pod_of ecommerce order-service)
+          P_FAV=$(pod_of ecommerce favourite-service)
+
+          echo "PF -> product-service: $P_PRODUCT, user-service: $P_USER, shipping: $P_SHIP, payment: $P_PAY, order: $P_ORDER, favourite: $P_FAV"
+
+          # Lanzar port-forwards a pods en background
+          nohup kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/dev/null 2>&1 & echo $! > pf_product.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_USER 8700:8700   >/dev/null 2>&1 & echo $! > pf_user.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_SHIP 8600:8600   >/dev/null 2>&1 & echo $! > pf_shipping.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_PAY 8400:8400    >/dev/null 2>&1 & echo $! > pf_payment.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_ORDER 8300:8300  >/dev/null 2>&1 & echo $! > pf_order.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_FAV 8800:8800    >/dev/null 2>&1 & echo $! > pf_favourite.pid
+
+          # Esperar un poco a que los port-forwards estén activos
+          sleep 300
+
+      - name: Warm-up and readiness checks (retry)
         run: |
           set -e
-          wait_ep() {
-            svc=$1
-            for i in $(seq 1 60); do
-              ready=$(kubectl -n ecommerce get endpoints "$svc" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
-              if [ -n "$ready" ]; then echo "Endpoints ready for $svc: $ready"; return 0; fi
-              echo "[$i/60] waiting endpoints for $svc"; sleep 5
-            done
-            echo "ERROR: endpoints not ready for $svc"; kubectl -n ecommerce get endpoints "$svc" -o wide; exit 1
-          }
-          for s in product-service user-service shipping-service payment-service order-service favourite-service; do
-            wait_ep "$s"
-          done
+          retry() { for i in $(seq 1 24); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
 
-      - name: Port-forward, warmup and run Locust
+          if ! retry http://localhost:8500/product-service/api/products; then
+            echo "DIAGNOSTICO: estado de product-service";
+            kubectl -n ecommerce get svc product-service -o yaml || true
+            kubectl -n ecommerce get endpoints product-service -o wide || true
+            kubectl -n ecommerce get pod -l app=product-service -o wide || true
+            P_PRODUCT=$(kubectl -n ecommerce get pod -l app=product-service -o jsonpath='{.items[0].metadata.name}' || true)
+            [ -n "$P_PRODUCT" ] && kubectl -n ecommerce logs "$P_PRODUCT" --tail=200 || true
+            exit 1
+          fi
+
+          if ! retry http://localhost:8700/user-service/api/users; then
+            echo "DIAGNOSTICO: estado de user-service";
+            kubectl -n ecommerce get svc user-service -o yaml || true
+            kubectl -n ecommerce get endpoints user-service -o wide || true
+            kubectl -n ecommerce get pod -l app=user-service -o wide || true
+            P_USER=$(kubectl -n ecommerce get pod -l app=user-service -o jsonpath='{.items[0].metadata.name}' || true)
+            [ -n "$P_USER" ] && kubectl -n ecommerce logs "$P_USER" --tail=200 || true
+            exit 1
+          fi
+
+          # Los siguientes pueden depender de otros servicios; intentamos pero no fallamos la preparación si devuelven !=200
+          curl -fsS http://localhost:8600/shipping-service/api/shippings || true
+          curl -fsS http://localhost:8400/payment-service/api/payments || true
+          curl -fsS http://localhost:8300/order-service/api/orders || true
+          curl -fsS http://localhost:8800/favourite-service/api/favourites || true
+
+      - name: Run Locust (headless)
         env:
           PRODUCT_URL: http://localhost:8500/product-service/api/products
           USER_URL: http://localhost:8700/user-service/api/users
@@ -91,70 +123,8 @@ jobs:
           PAYMENT_URL: http://localhost:8400/payment-service/api/payments
           ORDER_URL: http://localhost:8300/order-service/api/orders
           FAVOURITE_URL: http://localhost:8800/favourite-service/api/favourites
+          BASE_HOST: http://localhost
         run: |
-          set -e
-          # Resolve Pods in Running state
-          pod_of() {
-            kubectl -n ecommerce get pods -l app="$1" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | tail -n 1
-          }
-          P_PRODUCT=$(pod_of product-service)
-          P_USER=$(pod_of user-service)
-          P_SHIP=$(pod_of shipping-service)
-          P_PAY=$(pod_of payment-service)
-          P_ORDER=$(pod_of order-service)
-          P_FAV=$(pod_of favourite-service)
-          echo "PF -> product: $P_PRODUCT, user: $P_USER, ship: $P_SHIP, pay: $P_PAY, order: $P_ORDER, fav: $P_FAV"
-
-          # Start port-forwards to Pods in background and ensure cleanup
-          kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/tmp/pf-product.log 2>&1 & PF_PRODUCT=$!
-          kubectl -n ecommerce port-forward pod/$P_USER    8700:8700 >/tmp/pf-user.log    2>&1 & PF_USER=$!
-          kubectl -n ecommerce port-forward pod/$P_SHIP    8600:8600 >/tmp/pf-ship.log    2>&1 & PF_SHIP=$!
-          kubectl -n ecommerce port-forward pod/$P_PAY     8400:8400 >/tmp/pf-pay.log     2>&1 & PF_PAY=$!
-          kubectl -n ecommerce port-forward pod/$P_ORDER   8300:8300 >/tmp/pf-order.log   2>&1 & PF_ORDER=$!
-          kubectl -n ecommerce port-forward pod/$P_FAV     8800:8800 >/tmp/pf-fav.log     2>&1 & PF_FAV=$!
-          trap 'set +e; kill $PF_PRODUCT $PF_USER $PF_SHIP $PF_PAY $PF_ORDER $PF_FAV 2>/dev/null || true; sleep 1; for f in /tmp/pf-*.log; do echo "==== $f ====\n"; tail -n 50 "$f" || true; done' EXIT
-
-          # Wait ports to be open
-          wait_port() {
-            host=$1; port=$2; label=$3
-            for i in $(seq 1 60); do
-              if (echo > /dev/tcp/$host/$port) >/dev/null 2>&1; then echo "Port open: $label ($host:$port)"; return 0; fi
-              echo "[$i/60] waiting for $label ($host:$port)"; sleep 2
-            done
-            echo "ERROR: port not open: $label ($host:$port)"; exit 1
-          }
-          wait_port 127.0.0.1 8500 product-service
-          wait_port 127.0.0.1 8700 user-service
-
-          # Esperar a que las aplicaciones Spring Boot terminen de iniciarse (buscando "Started ...") en los logs de product y user antes del warmup.
-          echo "Waiting for Spring Boot apps to finish startup..."
-          wait_started() {
-            ns=$1; pod=$2; label=$3
-            for i in $(seq 1 120); do
-              if kubectl -n "$ns" logs "$pod" 2>/dev/null | grep -q "Started "; then
-                echo "$label reported Started in logs"; return 0; fi
-              echo "[$i/120] waiting for $label to log 'Started ...'"; sleep 2
-            done
-            echo "ERROR: $label did not log 'Started ...' in time"; kubectl -n "$ns" logs "$pod" --tail=200 || true; exit 1
-          }
-          wait_started ecommerce "$P_PRODUCT" product-service
-          wait_started ecommerce "$P_USER" user-service
-
-          # Give the apps a bit more time to bind the ports inside the pod
-          sleep 5
-
-          # Warmup endpoints (retry)
-          retry() { for i in $(seq 1 60); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
-          retry "$PRODUCT_URL"
-          retry "$USER_URL"
-          # Best effort warmups (don't fail pipeline)
-          curl -fsS "$SHIPPING_URL"  || true
-          curl -fsS "$PAYMENT_URL"   || true
-          curl -fsS "$ORDER_URL"     || true
-          curl -fsS "$FAVOURITE_URL" || true
-
-          # Run Locust (headless)
-          BASE_HOST=http://localhost \
           python -m locust -f tests/locust/locustfile.py --host http://localhost --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
 
       - name: Upload Locust report
@@ -165,15 +135,9 @@ jobs:
             locust-report.html
             locust-results*.csv
 
-      - name: Dump diagnostics on failure
-        if: failure()
-        run: |
-          set +e
-          kubectl -n ecommerce get pods -o wide
-          kubectl -n ecommerce get svc -o wide
-          kubectl -n ecommerce get endpoints -o wide
-
       - name: Teardown
         if: always()
         run: |
+          set +e
+          for pid in pf_*.pid; do [ -f "$pid" ] && kill $(cat "$pid") 2>/dev/null || true; done
           kind delete cluster --name dev-e2e
