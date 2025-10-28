@@ -56,7 +56,7 @@ jobs:
           set -e
           for d in service-discovery cloud-config; do
             echo "Waiting for $d"
-            kubectl -n ecommerce rollout status deploy/$d --timeout=180s || kubectl -n ecommerce get pods -o wide
+            kubectl -n ecommerce rollout status deploy/$d --timeout=240s || kubectl -n ecommerce get pods -o wide
           done
 
       - name: Wait for apps
@@ -64,7 +64,23 @@ jobs:
           set -e
           for d in user-service product-service order-service payment-service shipping-service favourite-service; do
             echo "Waiting for $d"
-            kubectl -n ecommerce rollout status deploy/$d --timeout=240s || kubectl -n ecommerce get pods -o wide
+            kubectl -n ecommerce rollout status deploy/$d --timeout=300s || kubectl -n ecommerce get pods -o wide
+          done
+
+      - name: Wait for service endpoints
+        run: |
+          set -e
+          wait_ep() {
+            svc=$1
+            for i in $(seq 1 60); do
+              ready=$(kubectl -n ecommerce get endpoints "$svc" -o jsonpath='{.subsets[*].addresses[*].ip}' || true)
+              if [ -n "$ready" ]; then echo "Endpoints ready for $svc: $ready"; return 0; fi
+              echo "[$i/60] waiting endpoints for $svc"; sleep 5
+            done
+            echo "ERROR: endpoints not ready for $svc"; kubectl -n ecommerce get endpoints "$svc" -o wide; exit 1
+          }
+          for s in product-service user-service shipping-service payment-service order-service favourite-service; do
+            wait_ep "$s"
           done
 
       - name: Port-forward Services
@@ -77,12 +93,12 @@ jobs:
           kubectl -n ecommerce port-forward svc/payment-service 8400:8400 >/tmp/pf-pay.log    2>&1 & echo $! > /tmp/pf-pay.pid
           kubectl -n ecommerce port-forward svc/order-service 8300:8300   >/tmp/pf-order.log  2>&1 & echo $! > /tmp/pf-order.pid
           kubectl -n ecommerce port-forward svc/favourite-service 8800:8800 >/tmp/pf-fav.log  2>&1 & echo $! > /tmp/pf-fav.pid
-          sleep 3
+          sleep 5
 
       - name: Warmup endpoints
         run: |
           set -e
-          retry() { for i in $(seq 1 30); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
+          retry() { for i in $(seq 1 60); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
           retry http://localhost:8500/product-service/api/products
           retry http://localhost:8700/user-service/api/users
           # Best effort warmups (don't fail pipeline)
@@ -93,7 +109,7 @@ jobs:
 
       - name: Run Locust (headless)
         run: |
-          locust -f tests/locust/locustfile.py --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
+          python -m locust -f tests/locust/locustfile.py --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
 
       - name: Upload Locust report
         uses: actions/upload-artifact@v4
@@ -102,6 +118,15 @@ jobs:
           path: |
             locust-report.html
             locust-results*.csv
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          set +e
+          kubectl -n ecommerce get pods -o wide
+          kubectl -n ecommerce get svc -o wide
+          kubectl -n ecommerce get endpoints -o wide
+          for f in /tmp/pf-*.log; do echo "==== $f ===="; tail -n +1 "$f"; done
 
       - name: Teardown
         if: always()
