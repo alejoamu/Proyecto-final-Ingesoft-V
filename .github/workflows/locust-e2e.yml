@@ -145,7 +145,7 @@ jobs:
 
       - name: Run Locust (headless)
         run: |
-          python -m locust -f tests/locust/locustfile.py --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
+          python -m locust -f tests/locust/locustfile.py --host http://localhost --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
 
       - name: Upload Locust report
         uses: actions/upload-artifact@v4

@@ -4,6 +4,8 @@ import os
 BASE_HOST = os.getenv("BASE_HOST", "http://localhost")
 
 class EcommerceUser(HttpUser):
+    # Locust exige un host base aunque usemos URLs absolutas; esto lo satisface
+    host = BASE_HOST
     wait_time = between(0.25, 0.75)
 
     @task(3)
