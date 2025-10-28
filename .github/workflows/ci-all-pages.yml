@@ -144,16 +144,31 @@ jobs:
             wait_ep "$s"
           done
 
-      - name: Port-forward services
+      - name: Port-forward pods (background)
         run: |
           set -e
-          kubectl -n ecommerce port-forward svc/product-service 8500:8500 >/tmp/pf-product.log 2>&1 & echo $! > /tmp/pf-product.pid
-          kubectl -n ecommerce port-forward svc/user-service 8700:8700   >/tmp/pf-user.log    2>&1 & echo $! > /tmp/pf-user.pid
-          kubectl -n ecommerce port-forward svc/shipping-service 8600:8600 >/tmp/pf-ship.log   2>&1 & echo $! > /tmp/pf-ship.pid
-          kubectl -n ecommerce port-forward svc/payment-service 8400:8400 >/tmp/pf-pay.log    2>&1 & echo $! > /tmp/pf-pay.pid
-          kubectl -n ecommerce port-forward svc/order-service 8300:8300   >/tmp/pf-order.log  2>&1 & echo $! > /tmp/pf-order.pid
-          kubectl -n ecommerce port-forward svc/favourite-service 8800:8800 >/tmp/pf-fav.log  2>&1 & echo $! > /tmp/pf-fav.pid
-          sleep 5
+          # Obtiene un pod Running por etiqueta app
+          pod_of() {
+            kubectl -n ecommerce get pods -l app="$1" --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | head -n 1
+          }
+          P_PRODUCT=$(pod_of product-service)
+          P_USER=$(pod_of user-service)
+          P_SHIP=$(pod_of shipping-service)
+          P_PAY=$(pod_of payment-service)
+          P_ORDER=$(pod_of order-service)
+          P_FAV=$(pod_of favourite-service)
+          echo "PF -> product: $P_PRODUCT, user: $P_USER, ship: $P_SHIP, pay: $P_PAY, order: $P_ORDER, fav: $P_FAV"
+
+          # Lanzar port-forwards a pods en background y guardar PIDs en /tmp
+          nohup kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/dev/null 2>&1 & echo $! > /tmp/pf-product.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_USER    8700:8700 >/dev/null 2>&1 & echo $! > /tmp/pf-user.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_SHIP    8600:8600 >/dev/null 2>&1 & echo $! > /tmp/pf-ship.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_PAY     8400:8400 >/dev/null 2>&1 & echo $! > /tmp/pf-pay.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_ORDER   8300:8300 >/dev/null 2>&1 & echo $! > /tmp/pf-order.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_FAV     8800:8800 >/dev/null 2>&1 & echo $! > /tmp/pf-fav.pid
+
+          # Esperar un poco a que los port-forwards estén activos
+          sleep 300
 
       - name: E2E readiness checks (HTML)
         run: |
@@ -172,7 +187,7 @@ jobs:
                   echo "<li><b>FAIL</b> $url</li>"
                 fi
             done
-            # best effort for others
+            # best effort para otros servicios
             for url in \
               http://localhost:8600/shipping-service/api/shippings \
               http://localhost:8400/payment-service/api/payments \
@@ -188,8 +203,16 @@ jobs:
           } > site/e2e/index.html
 
       - name: Run Locust (headless)
+        env:
+          PRODUCT_URL: http://localhost:8500/product-service/api/products
+          USER_URL: http://localhost:8700/user-service/api/users
+          SHIPPING_URL: http://localhost:8600/shipping-service/api/shippings
+          PAYMENT_URL: http://localhost:8400/payment-service/api/payments
+          ORDER_URL: http://localhost:8300/order-service/api/orders
+          FAVOURITE_URL: http://localhost:8800/favourite-service/api/favourites
+          BASE_HOST: http://localhost
         run: |
-          python -m locust -f tests/locust/locustfile.py --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
+          python -m locust -f tests/locust/locustfile.py --host http://localhost --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
           mkdir -p site/locust
           mv locust-report.html site/locust/
           mv locust-results* site/locust/
