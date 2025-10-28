@@ -84,8 +84,9 @@ jobs:
 
       - name: Install Locust deps
         run: |
-          python -m pip install --upgrade pip
-          pip install -r tests/locust/requirements.txt
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r tests/locust/requirements.txt
+          python -c "import locust, sys; print('Locust:', locust.__version__)"
 
       - name: Create kind cluster
         uses: helm/kind-action@v1.9.0
