@@ -50,17 +50,17 @@ jobs:
             mkdir -p "$out"; \
             cp -r "$d"/* "$out/" || true; \
           done
-          # Basic index.html
+          # Basic index.html (sin indentación en here-doc)
           cat > "$SITE_DIR/index.html" <<'HTML'
-          <html><head><meta charset="utf-8"><title>CI Reports</title></head><body>
-          <h1>Ecommerce Microservices - CI Reports</h1>
-          <ul>
-            <li><a href="unit-integration/">Unit & Integration (Surefire)</a></li>
-            <li><a href="e2e/">E2E Readiness</a></li>
-            <li><a href="locust/">Locust Load Test</a></li>
-          </ul>
-          </body></html>
-          HTML
+<html><head><meta charset="utf-8"><title>CI Reports</title></head><body>
+<h1>Ecommerce Microservices - CI Reports</h1>
+<ul>
+  <li><a href="unit-integration/">Unit & Integration (Surefire)</a></li>
+  <li><a href="e2e/">E2E Readiness</a></li>
+  <li><a href="locust/">Locust Load Test</a></li>
+</ul>
+</body></html>
+HTML
           echo "site_path=$SITE_DIR" >> $GITHUB_OUTPUT
 
       - name: Upload site partial (unit/integration)
@@ -228,30 +228,30 @@ jobs:
         run: |
           if [ ! -f site/index.html ]; then
             cat > site/index.html <<'HTML'
-            <html><head><meta charset="utf-8"><title>CI Reports</title></head><body>
-            <h1>Ecommerce Microservices - CI Reports</h1>
-            <ul>
-              <li><a href="unit-integration/">Unit & Integration (Surefire)</a></li>
-              <li><a href="e2e/">E2E Readiness</a></li>
-              <li><a href="locust/">Locust Load Test</a></li>
-            </ul>
-            </body></html>
-            HTML
+<html><head><meta charset="utf-8"><title>CI Reports</title></head><body>
+<h1>Ecommerce Microservices - CI Reports</h1>
+<ul>
+  <li><a href="unit-integration/">Unit & Integration (Surefire)</a></li>
+  <li><a href="e2e/">E2E Readiness</a></li>
+  <li><a href="locust/">Locust Load Test</a></li>
+</ul>
+</body></html>
+HTML
           fi
 
       - name: Ensure 404 page exists
         run: |
           cat > site/404.html <<'HTML'
-          <html><head><meta charset="utf-8"><title>404 - Not Found</title></head><body>
-          <h1>404 - Página no encontrada</h1>
-          <p>Vuelve al <a href="/">inicio</a> o navega a:</p>
-          <ul>
-            <li><a href="/unit-integration/">Unit & Integration</a></li>
-            <li><a href="/e2e/">E2E Readiness</a></li>
-            <li><a href="/locust/">Locust</a></li>
-          </ul>
-          </body></html>
-          HTML
+<html><head><meta charset="utf-8"><title>404 - Not Found</title></head><body>
+<h1>404 - Página no encontrada</h1>
+<p>Vuelve al <a href="/">inicio</a> o navega a:</p>
+<ul>
+  <li><a href="/unit-integration/">Unit & Integration</a></li>
+  <li><a href="/e2e/">E2E Readiness</a></li>
+  <li><a href="/locust/">Locust</a></li>
+</ul>
+</body></html>
+HTML
 
       - name: Upload combined site
         uses: actions/upload-pages-artifact@v3
