@@ -50,7 +50,26 @@ jobs:
             mkdir -p "$out"; \
             cp -r "$d"/* "$out/" || true; \
           done
-          # Basic index.html
+          # Build unit-integration index.html
+          ui="$SITE_DIR/unit-integration/index.html"
+          printf '%s\n' \
+            '<html><head><meta charset="utf-8"><title>Unit & Integration Reports</title></head><body>' \
+            '<h1>Unit & Integration (Surefire)</h1>' \
+            '<ul>' > "$ui"
+          # List modules and files
+          find "$SITE_DIR/unit-integration" -mindepth 1 -maxdepth 1 -type d -print0 | while IFS= read -r -d '' mod; do \
+            modname=$(basename "$mod"); \
+            printf '%s\n' "<li><b>${modname}</b><ul>" >> "$ui"; \
+            find "$mod" -maxdepth 1 -type f -name '*.xml' -print0 | while IFS= read -r -d '' f; do \
+              # ruta relativa desde unit-integration/ (sin barra inicial)
+              rel_module=${f#"$SITE_DIR/unit-integration/"}; \
+              printf '%s\n' "<li><a href='${rel_module}'>$(basename \"$f\")</a></li>" >> \"$ui\"; \
+            done; \
+            printf '%s\n' '</ul></li>' >> "$ui"; \
+          done
+          printf '%s\n' '</ul></body></html>' >> "$ui"
+
+          # Root index.html
           printf '%s\n' \
             '<html><head><meta charset="utf-8"><title>CI Reports</title></head><body>' \
             '<h1>Ecommerce Microservices - CI Reports</h1>' \
@@ -223,6 +242,17 @@ jobs:
           mkdir -p site/locust
           mv locust-report.html site/locust/
           mv locust-results* site/locust/
+          # Build locust index.html
+          printf '%s\n' \
+            '<html><head><meta charset="utf-8"><title>Locust Reports</title></head><body>' \
+            '<h1>Locust Load Test</h1>' \
+            '<ul>' \
+            '  <li><a href="locust-report.html">locust-report.html</a></li>' \
+            '  <li><a href="locust-results_stats.csv">locust-results_stats.csv</a></li>' \
+            '  <li><a href="locust-results_failures.csv">locust-results_failures.csv</a></li>' \
+            '</ul>' \
+            '</body></html>' \
+            > site/locust/index.html
 
       - name: Ensure root index.html exists
         run: |
@@ -252,6 +282,11 @@ jobs:
             '</ul>' \
             '</body></html>' \
             > site/404.html
+
+      - name: List site content (diagnostic)
+        run: |
+          echo "== SITE CONTENT =="
+          find site -maxdepth 3 -type f -printf '%P\n' | sort
 
       - name: Upload combined site
         uses: actions/upload-pages-artifact@v3
