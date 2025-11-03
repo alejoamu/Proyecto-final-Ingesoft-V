@@ -65,7 +65,7 @@ jobs:
             find "$mod" -maxdepth 1 -type f -name '*.xml' -print0 | while IFS= read -r -d '' f; do \
               # ruta relativa desde unit-integration/ (sin barra inicial)
               rel_module=${f#"$SITE_DIR/unit-integration/"}; \
-              printf '%s\n' "<li><a href='${rel_module}'>$(basename \"$f\")</a></li>" >> \"$ui\"; \
+              printf '%s\n' "<li><a href='${rel_module}'>$(basename "$f")</a></li>" >> "$ui"; \
             done; \
             printf '%s\n' '</ul></li>' >> "$ui"; \
           done
