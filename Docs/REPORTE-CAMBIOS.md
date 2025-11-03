@@ -3,6 +3,13 @@
 Fecha: 2025-11-03
 Repositorio: ecommerce-microservice-backend-app
 
+Este informe consolida el estado actual y los cambios efectivos en el repositorio por áreas: Kubernetes, Terraform, Ansible, CI/CD (pipelines y reportes), pruebas unitarias e integración, E2E (Postman), carga (Locust), Dockerfiles y Docker Compose. Donde no se dispone de historial Git local, el reporte se basa en los archivos presentes y en la documentación incluida en `Docs/`.
+
+Importante sobre CI/CD y GitHub Pages en `dev`:
+- Hoy existen workflows en `.github/workflows/` y están descritos abajo. La documentación (`Docs/DEV-CI-E2E.md` y `Docs/REPORTE-CI-E2E-LOCUST.md`) amplía el diseño.
+- Nota de `dev`: está configurado para NO publicar a Pages por reglas del entorno; aun así, los workflows generan artifacts. Si se quiere volver a publicar desde `dev`, hay que ajustar la política del entorno y/o el job de Pages para esa rama.
+
+---
 
 ## 1) Resumen ejecutivo
 
@@ -11,7 +18,7 @@ Repositorio: ecommerce-microservice-backend-app
 - Ansible automatiza una VM de CI: Docker + Compose, SonarQube + Postgres, Nginx reverse proxy (Sonar bajo `/sonar` y Locust en `8089`), K3s y Helm; además, herramientas de seguridad (Trivy) y healthchecks robustos.
 - Terraform (Azure) crea RG, VNet/Subnet, NSG con reglas para 22/80/443/9000/8089/6443 y VMs Ubuntu 20.04 para los nombres provistos en `servers`; expone `public_ips` y `vm_ids` por servidor.
 - Pruebas: unitarias e integración presentes por servicio (Spring Boot). E2E con Postman sobre puertos de host (mapeados desde NodePort). Carga con Locust (peso en `/products` y `/users`).
-- CI/CD: no hay YAMLs en el repo actualmente, pero la documentación detalla dos enfoques: uno combinado (CI + E2E + Locust + Pages) y otro específico para `dev` (Locust + artifacts). En `dev` se decidió no publicar a Pages; los reportes quedan como artifacts.
+- CI/CD: existen 4 workflows en `.github/workflows`: `ci-all-pages.yml`, `dev-ci.yml`, `dev-e2e.yml`, `locust-e2e.yml`. El combinado puede desplegar a Pages (según reglas del entorno); en `dev`, por política, se están publicando como artifacts.
 
 ---
 
@@ -50,6 +57,9 @@ Repositorio: ecommerce-microservice-backend-app
     - shipping: 30600 → 8600
     - user: 30700 → 8700
     - favourite: 30800 → 8800
+
+Imagen de montado (en actions):
+![img.png](img.png)
 
 Observaciones/mejoras:
 - Añadir liveness/readiness probes en todos los Deployments para robustez.
@@ -138,6 +148,10 @@ Observaciones:
   - En varios módulos hay `*AdditionalWebMvcTests`.
 - Recomendado: añadir Jacoco y publicar cobertura en artifacts/Pages.
 
+Imagen de reporte:
+
+![img_4.png](img_4.png)
+
 ---
 
 ## 8) E2E con Postman (`tests/postman/`)
@@ -152,6 +166,10 @@ Observaciones:
 - Cada request valida `status 200`.
 - Mejora: añadir casos contra el API Gateway (8080) además de endpoints directos.
 
+Imagen de reporte:
+![img_5.png](img_5.png)
+
+![img_6.png](img_6.png)
 ---
 
 ## 9) Pruebas de carga con Locust (`tests/locust/`)
@@ -163,23 +181,49 @@ Observaciones:
 - `requirements.txt`: `locust==2.31.3`.
 - Ejecutable en modo headless con HTML/CSV (según pipelines descritos en Docs).
 
+Imagenes pruebas en locust:
+
+![img_3.png](img_3.png)
+
+![img_2.png](img_2.png)
+
+![img_1.png](img_1.png)
+
 ---
 
-## 10) Pipelines CI/CD y reportes (Docs)
+## 10) Pipelines CI/CD y reportes (Workflows)
 
-- No hay workflows YAML presentes hoy en `.github/workflows`.
-- Documentación disponible:
-  - `Docs/DEV-CI-E2E.md` (CI y E2E para `dev`):
-    - CI: build+tests Maven, docker build local (sin push), lint K8s.
-    - E2E: kind + kubectl + port-forward + Newman; artifacts (`surefire-reports`, `k8s-rendered`, `newman-results`).
-  - `Docs/REPORTE-CI-E2E-LOCUST.md` (workflow combinado + Pages):
-    - Jobs: Unit/Integration → `site/unit-integration`, E2E+Locust → `site/locust`, luego `deploy-pages`.
-- Nota de rama `dev`: configurada para no publicar en Pages; se generan reportes como artifacts. Para publicar desde `dev`, restaurar los workflows y habilitar el job de Pages para esa rama.
+Workflows presentes en `.github/workflows`:
 
-Acciones sugeridas para restaurar pipelines:
-- Añadir `.github/workflows/ci-all-pages.yml` (main/dev) y/o `dev-ci.yml` + `dev-e2e.yml` (sólo dev) conforme a Docs.
-- En Settings > Pages, seleccionar “GitHub Actions” y permitir despliegue desde `dev` si aplica.
-- En Branch Protection, marcar checks requeridos (los de los nuevos workflows).
+1. `ci-all-pages.yml` (CI + E2E + Locust + Pages)
+   - Triggers: `push`, `pull_request` y `workflow_dispatch` en `main`, `master` y `dev`.
+   - Jobs:
+     - `build-and-test`: ejecuta `./mvnw test`, recopila surefire en `site/unit-integration` y sube artifact parcial `site-unit-integration`.
+     - `e2e-and-locust` (kind): aplica `k8s/`, espera rollouts/endpoints, hace port-forward a pods, genera `site/e2e/index.html` (readiness), corre Locust en modo headless (HTML/CSV a `site/locust`) y sube `site` con `actions/upload-pages-artifact`.
+     - `deploy-pages`: publica `site/` a GitHub Pages (`actions/deploy-pages`).
+   - Nota: Se corrigió un 404 tras el deploy agregando en `e2e-and-locust` la descarga/merge del artifact `site-unit-integration` al directorio `site` y pasos que aseguran `site/index.html` y `site/404.html` antes de subir el artifact de Pages. Si las reglas de entorno bloquean `dev`, el contenido queda como artifact para descarga.
+
+2. `dev-ci.yml` (CI en rama `dev`)
+   - Triggers: `push`, `pull_request` y `workflow_dispatch` en `dev`.
+   - Jobs:
+     - `build-java`: build+tests Maven y publicación de `surefire-reports` como artifact.
+     - `docker-build`: build de imágenes de todos los servicios (sin push) con Buildx y caché.
+     - `k8s-lint`: `kustomize build` → `k8s-rendered.yaml` y validación `kubeconform`; sube artifact `k8s-rendered`.
+
+3. `dev-e2e.yml` (E2E con Newman en kind; rama `dev`)
+   - Triggers: `push`, `pull_request` y `workflow_dispatch` en `dev`.
+   - Jobs:
+     - `unit-integration`: `mvn test` (deshabilita eureka/config), publica `surefire-reports`.
+     - `e2e`: crea cluster kind, aplica `k8s` con `kubectl apply -k`, espera Deployments/Pods Ready, port-forward a pods, warm-up con retries, ejecuta Newman y sube `newman-results.xml` como artifact.
+
+4. `locust-e2e.yml` (E2E de carga con Locust en kind; rama `dev`)
+   - Triggers: `push`, `pull_request` y `workflow_dispatch` en `dev`.
+   - Job `e2e-locust`:
+     - Instala Python/Locust, crea cluster kind, `kubectl apply -k k8s`, espera Ready, port-forward a pods, warm-up (retries), ejecuta Locust en `--headless` (1m, u=50, r=10), y sube artifacts: `locust-report.html` y `locust-results*.csv`.
+
+Recomendaciones de configuración:
+- Si deseas publicar Pages también desde `dev`, revisa Settings > Pages (entorno `github-pages`) y ajusta las reglas para permitir deploy desde `dev` o limita triggers a `main`/`master` si quieres mantener la política actual.
+- En Branch Protection, marca como checks requeridos los jobs relevantes de estos workflows.
 
 ---
 
@@ -224,7 +268,7 @@ Recursos Terraform principales:
 - Kubernetes: OK (manifiestos y configuración detallada).
 - Terraform: OK (proveedor, recursos, módulo VM y reglas NSG).
 - Ansible: OK (plays, reverse proxy, compose, K3s, Trivy, healthchecks, swap).
-- Pipelines/CI: Estado actual y diseño documentado; YAMLs ausentes en repo → Pendiente restauración si se desea (Docs provee guía).
+- Pipelines/CI: OK (4 workflows presentes y descritos; publicación a Pages condicionada por reglas de entorno en `dev`).
 - Pruebas unitarias: OK (presencia por servicio y patrón descrito).
 - E2E (Postman): OK (colección y endpoints).
 - Locust: OK (script y escenarios).
@@ -265,4 +309,3 @@ locust -f tests\locust\locustfile.py --headless -u 20 -r 5 -t 1m --html locust-r
 ---
 
 Fin del reporte.
-

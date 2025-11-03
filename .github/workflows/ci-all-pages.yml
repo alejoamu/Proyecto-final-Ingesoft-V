@@ -77,6 +77,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download site-unit-integration (merge)
+        uses: actions/download-artifact@v4
+        with:
+          name: site-unit-integration
+          path: site
+        continue-on-error: true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -216,6 +223,35 @@ jobs:
           mkdir -p site/locust
           mv locust-report.html site/locust/
           mv locust-results* site/locust/
+
+      - name: Ensure root index.html exists
+        run: |
+          if [ ! -f site/index.html ]; then
+            cat > site/index.html <<'HTML'
+            <html><head><meta charset="utf-8"><title>CI Reports</title></head><body>
+            <h1>Ecommerce Microservices - CI Reports</h1>
+            <ul>
+              <li><a href="unit-integration/">Unit & Integration (Surefire)</a></li>
+              <li><a href="e2e/">E2E Readiness</a></li>
+              <li><a href="locust/">Locust Load Test</a></li>
+            </ul>
+            </body></html>
+            HTML
+          fi
+
+      - name: Ensure 404 page exists
+        run: |
+          cat > site/404.html <<'HTML'
+          <html><head><meta charset="utf-8"><title>404 - Not Found</title></head><body>
+          <h1>404 - Página no encontrada</h1>
+          <p>Vuelve al <a href="/">inicio</a> o navega a:</p>
+          <ul>
+            <li><a href="/unit-integration/">Unit & Integration</a></li>
+            <li><a href="/e2e/">E2E Readiness</a></li>
+            <li><a href="/locust/">Locust</a></li>
+          </ul>
+          </body></html>
+          HTML
 
       - name: Upload combined site
         uses: actions/upload-pages-artifact@v3
