@@ -52,6 +52,7 @@ jobs:
           done
           # Build unit-integration index.html
           ui="$SITE_DIR/unit-integration/index.html"
+          mkdir -p "$(dirname "$ui")"
           printf '%s\n' \
             '<html><head><meta charset="utf-8"><title>Unit & Integration Reports</title></head><body>' \
             '<h1>Unit & Integration (Surefire)</h1>' \
