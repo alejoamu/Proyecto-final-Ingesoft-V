@@ -39,10 +39,11 @@ jobs:
 
       - name: Collect unit/integration reports into site
         id: collect
+        shell: bash
         run: |
           set -e
           SITE_DIR="site"
-          mkdir -p "$SITE_DIR/unit-integration"
+          mkdir -p "$SITE_DIR" "$SITE_DIR/unit-integration"
           # Copy all surefire reports
           find . -type d -path '*/target/surefire-reports' | while read -r d; do \
             m=$(echo "$d" | sed -E 's#\./([^/]+)/.*#\1#'); \
@@ -198,6 +199,7 @@ jobs:
           sleep 300
 
       - name: E2E readiness checks (HTML)
+        shell: bash
         run: |
           set -e
           retry() { for i in $(seq 1 24); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
@@ -238,9 +240,11 @@ jobs:
           ORDER_URL: http://localhost:8300/order-service/api/orders
           FAVOURITE_URL: http://localhost:8800/favourite-service/api/favourites
           BASE_HOST: http://localhost
+        shell: bash
         run: |
+          set -e
+          mkdir -p site site/locust
           python -m locust -f tests/locust/locustfile.py --host http://localhost --headless -u 50 -r 10 -t 1m --html locust-report.html --csv locust-results
-          mkdir -p site/locust
           mv locust-report.html site/locust/
           mv locust-results* site/locust/
           # Build locust index.html
