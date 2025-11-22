@@ -1,4 +1,3 @@
-
 # e-Commerce-boot μServices 
 
 ## Important Note: This project's new milestone is to move The whole system to work on Kubernetes, so stay tuned.
@@ -774,3 +773,53 @@ Sugerencia: Si trabajas en `dev`, puedes revisar los artifacts generados (site.z
   - Payment: `GET /payment-service/api/payments`
   - Shipping: `GET /shipping-service/api/shippings`
   - Favourite: `GET /favourite-service/api/favourites`
+
+# e-Commerce-boot μServices 
+
+## Calidad de Código y Seguridad
+
+Esta sección describe cómo ejecutar análisis de calidad (SonarQube) y escaneo de vulnerabilidades (Trivy).
+
+### SonarQube Local
+1. Levanta SonarQube dentro del landscape principal (requiere red creada por core.yml previamente):
+```
+docker compose -f compose.yml up -d sonarqube
+```
+(O si solo quieres SonarQube: `docker run -d --name sonarqube -p 9000:9000 sonarqube:9.9-community`)
+2. Accede a http://localhost:9000 y crea un token (Administración -> Seguridad).
+3. En PowerShell exporta variables:
+```
+$Env:SONAR_HOST_URL="http://localhost:9000"
+$Env:SONAR_TOKEN="<tu_token>"
+```
+4. Ejecuta el script:
+```
+quality-scan.cmd
+```
+Esto compila, ejecuta tests con cobertura (JaCoCo) y sube resultados a SonarQube.
+
+### Trivy Local
+Ejecuta escaneo de dependencias, código y luego imágenes:
+```
+trivy-scan.cmd
+```
+Los reportes se generan en `security-reports/`. El script fallará por vulnerabilidades HIGH/CRITICAL (mostrará mensajes) pero continúa listando reportes.
+
+### Pipeline CI
+El workflow `code-quality.yml` ejecuta automáticamente:
+- Build + tests + cobertura
+- Análisis Sonar (requiere secretos `SONAR_HOST_URL` y `SONAR_TOKEN` en GitHub)
+- Escaneo Trivy filesystem e imágenes (falla en severidades HIGH/CRITICAL)
+
+### Ajustes y Exclusiones
+Las exclusiones configuradas en `sonar-project.properties` ignoran carpetas de infraestructura (`k8s`, `infra`, `Ansible`, artefactos `target`, pruebas de rendimiento, e2e, archivos binarios y diagramas). Ajusta estas listas según evolucionen los módulos de pruebas.
+
+### Política Inicial
+- Cobertura mínima aspirada: 60% (ajustable en Sonar Quality Gate).
+- 0 vulnerabilidades HIGH/CRITICAL aceptadas en escaneos Trivy.
+- Sin code smells críticos nuevos en ramas principales.
+
+### Próximos Pasos
+- Agregar agregación de cobertura global.
+- Integrar análisis adicional (SpotBugs, OWASP Dependency-Check).
+- Endurecer Quality Gate (duplications, mantenibilidad) tras estabilizar cobertura.

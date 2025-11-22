@@ -95,3 +95,25 @@ services:
       - EUREKA_CLIENT_REGISTER_WITH_EUREKA=true
       - EUREKA_CLIENT_FETCH_REGISTRY=true
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+
+  sonarqube:
+    image: sonarqube:9.9-community
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonarqube_data_stage:/opt/sonarqube/data
+      - sonarqube_extensions_stage:/opt/sonarqube/extensions
+      - sonarqube_logs_stage:/opt/sonarqube/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/api/system/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  sonarqube_data_stage:
+  sonarqube_extensions_stage:
+  sonarqube_logs_stage:
