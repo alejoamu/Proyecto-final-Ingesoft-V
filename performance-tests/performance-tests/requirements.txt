@@ -1,0 +1,21 @@
+# Requirements for E-commerce Microservices Performance Testing
+
+# Core testing framework
+locust==2.17.0
+
+# Data analysis and reporting
+pandas==2.0.3
+numpy==1.24.3
+
+# HTTP client for health checks
+requests==2.31.0
+
+# JSON handling
+jsonschema==4.19.0
+
+# Logging and monitoring
+colorlog==6.7.0
+
+# Optional: For advanced reporting
+matplotlib==3.7.2
+seaborn==0.12.2
