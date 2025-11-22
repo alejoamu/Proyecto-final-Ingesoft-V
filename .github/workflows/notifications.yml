@@ -1,0 +1,108 @@
+name: Notifications
+
+on:
+  workflow_run:
+    workflows:
+      - Integrated CI/CD Pipeline
+      - Code Quality & Security
+    types:
+      - completed
+
+env:
+  # Webhook Slack (quemado para entorno académico; NO usar en producción si el repo es público)
+  BURNED_SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
+  # Webhook Teams / Power Automate (HTTP trigger)
+  BURNED_TEAMS_WEBHOOK_URL: "https://defaulte994072b523e4bfe86e2442c5e10b2.44.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/dbe0f4c0668c403cae3b5c5ab1de83ea/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=GHFG8Og6Go0aaNQUUNjejrBKDgeLJ9d0HkAqEfXnUi8"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Set status
+        id: status
+        run: |
+          if [ "${{ github.event.workflow_run.conclusion }}" = "success" ]; then
+            echo "status=PASSED" >> $GITHUB_OUTPUT
+          else
+            echo "status=FAILED" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Descargar y extraer logs (solo si falla)
+        if: steps.status.outputs.status == 'FAILED'
+        env:
+          LOGS_URL: ${{ github.event.workflow_run.logs_url }}
+        run: |
+          echo "Logs URL: $LOGS_URL"
+          curl -L -H "Authorization: Bearer $GITHUB_TOKEN" -o logs.zip "$LOGS_URL"
+          unzip -q logs.zip -d logs
+          echo "Archivos de log extraídos:" && ls -1 logs | head -n 20
+
+      - name: Generar snippet de fallos
+        if: steps.status.outputs.status == 'FAILED'
+        id: snippet
+        run: |
+          # Buscar patrones comunes de error en todos los .txt
+          MAX_LINES=200
+          PATTERN='ERROR|Error|FAIL|Fail|::error'
+          mkdir -p distilled
+          for f in logs/*.txt; do
+            grep -E "$PATTERN" "$f" | head -n $MAX_LINES >> distilled/failures.txt || true
+          done
+          if [ -f distilled/failures.txt ]; then
+            # Limitar tamaño (Slack/Teams)
+            head -c 8000 distilled/failures.txt > distilled/failures_truncated.txt
+            echo 'found=true' >> $GITHUB_OUTPUT
+            # Escapar comillas para JSON
+            SNIPPET=$(sed 's/"/\\"/g' distilled/failures_truncated.txt | sed 's/$/\\n/' | tr -d '\r')
+            echo "snippet=$SNIPPET" >> $GITHUB_OUTPUT
+          else
+            echo 'found=false' >> $GITHUB_OUTPUT
+            echo 'snippet=No se encontraron líneas con patrones de error.' >> $GITHUB_OUTPUT
+          fi
+
+      - name: Slack notification (burned webhook)
+        if: always()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "Workflow '${{ github.event.workflow_run.name }}' ${{ steps.status.outputs.status }} en ${{ github.repository }}@${{ github.ref_name }}.",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {"type": "mrkdwn", "text": "*${{ github.event.workflow_run.name }}* finalizado con *${{ steps.status.outputs.status }}*\nRepositorio: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nActor: ${{ github.actor }}\nRun: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Ver ejecución>"}
+                }
+                {{#if failure}}
+                ,{
+                  "type": "section",
+                  "text": {"type": "mrkdwn", "text": "*Snippet de errores:*\n```"}
+                }
+                {{/if}}
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.BURNED_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        continue-on-error: true
+
+      - name: Enviar snippet separado a Slack si falló
+        if: steps.status.outputs.status == 'FAILED'
+        run: |
+          # Enviar segundo mensaje con snippet (más simple, evita plantillas complicadas)
+          PAYLOAD=$(jq -Rn --arg t "${{ github.event.workflow_run.name }}" --arg s "${{ steps.status.outputs.status }}" --arg repo "${{ github.repository }}" --arg branch "${{ github.ref_name }}" --arg actor "${{ github.actor }}" --arg snippet "${{ steps.snippet.outputs.snippet }}" '{text: ($t + " " + $s + " en " + $repo + "@" + $branch + " por " + $actor + "\nSnippet de errores:\n```" + $snippet + "```")}')
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" ${{ env.BURNED_SLACK_WEBHOOK_URL }}
+
+      - name: Teams/PowerAutomate notification (optional)
+        if: always() && env.BURNED_TEAMS_WEBHOOK_URL != ''
+        run: |
+          curl -H 'Content-Type: application/json' -d '{
+            "workflow":"${{ github.event.workflow_run.name }}",
+            "status":"${{ github.event.workflow_run.conclusion }}",
+            "repository":"${{ github.repository }}",
+            "branch":"${{ github.ref_name }}",
+            "actor":"${{ github.actor }}",
+            "run_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }' ${{ env.BURNED_TEAMS_WEBHOOK_URL }}

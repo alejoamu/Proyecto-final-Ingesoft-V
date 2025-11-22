@@ -75,6 +75,54 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "Code Quality job FAILED in ${{ github.workflow }} for ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Code Quality Analysis Failed* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*SonarQube Scan:* ${!steps.sonarQubeScan.outcome}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Quality Gate:* ${!steps.qualityGateCheck.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
   # ==================== JOB 2: SECURITY SCAN (Trivy) ====================
   security-scan:
     name: Security Scan (Trivy)
@@ -139,6 +187,54 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "Security Scan FAILED for ${{ matrix.service }} in ${{ github.workflow }} on ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Security Scan Failed* for service *${{ matrix.service }}* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Trivy Scan:* ${!steps.runTrivyVulnerabilityScanner.outcome}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Dockerfile Scan:* ${!steps.scanDockerfile.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
   # ==================== JOB 3: SEMANTIC VERSIONING ====================
   semantic-version:
     name: Semantic Versioning
@@ -167,6 +263,50 @@ jobs:
         run: |
           echo "Version: ${{ steps.semver.outputs.version }}"
           echo "Tag: ${{ steps.semver.outputs.tag }}"
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "Semantic Release FAILED in ${{ github.workflow }} for ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Semantic Release Failed* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Version Generation:* ${!steps.generateSemanticVersion.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 4: UNIT & INTEGRATION TESTS ====================
   unit-integration-tests:
@@ -218,6 +358,54 @@ jobs:
           path: |
             **/target/surefire-reports/**
             **/target/site/surefire-report.html
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "Unit/Integration Tests FAILED in ${{ github.workflow }} for ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Unit/Integration Tests Failed* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Unit Tests:* ${!steps.rununitests.outcome}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Integration Tests:* ${!steps.runintegrationtests.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 5: BUILD DOCKER IMAGES ====================
   build-docker:
@@ -291,6 +479,54 @@ jobs:
         with:
           sarif_file: 'trivy-image-${{ matrix.service }}.sarif'
 
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "Build Docker FAILED for ${{ matrix.service }} in ${{ github.workflow }} for ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Docker Build Failed* for service *${{ matrix.service }}* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Build and Push:* ${!steps.buildandpushdockerimage.outcome}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Trivy Scan:* ${!steps.scanimagewithtrivy.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
   # ==================== JOB 6: E2E TESTS ====================
   e2e-tests:
     name: E2E Tests (K8s + Newman)
@@ -355,6 +591,50 @@ jobs:
         if: always()
         run: kind delete cluster --name e2e-test || true
 
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "E2E Tests FAILED in ${{ github.workflow }} for ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*E2E Tests Failed* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Newman Tests:* ${!steps.runE2ETests.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
   # ==================== JOB 7: DEPLOY TO STAGE (with approval) ====================
   deploy-stage:
     name: Deploy to Stage Environment
@@ -371,13 +651,55 @@ jobs:
       - name: Deploy to Kubernetes (Stage)
         run: |
           echo "Deploying to stage environment..."
-          # Add your deployment commands here
           # kubectl apply -k k8s -n stage
 
       - name: Health check
         run: |
           echo "Performing health checks..."
-          # Add health check commands
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "Stage deployment FAILED in ${{ github.workflow }} for ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Stage Deployment Failed* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Deployment:* ${!steps.deploytokubernetesstage.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 8: DEPLOY TO PROD (with approval) ====================
   deploy-prod:
@@ -395,13 +717,55 @@ jobs:
       - name: Deploy to Kubernetes (Production)
         run: |
           echo "Deploying to production environment..."
-          # Add your deployment commands here
           # kubectl apply -k k8s -n production
 
       - name: Health check
         run: |
           echo "Performing health checks..."
-          # Add health check commands
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {"text": "Production deployment FAILED in ${{ github.workflow }} for ${{ github.ref_name }}",
+            "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment Failed* in *${{ github.workflow }}*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\n\n*Failed Steps:*"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Deployment:* ${!steps.deploytokubernetesproduction.outcome}"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Details"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 9: NOTIFICATIONS ====================
   notify:
@@ -497,4 +861,3 @@ jobs:
               body: `Pipeline failed for commit ${context.sha}\n\n**Branch:** ${context.ref}\n**Author:** ${context.actor}\n**Workflow:** ${context.workflow}\n\n**Failed Jobs:**\n- Code Quality: ${{ needs.code-quality.result }}\n- Security Scan: ${{ needs.security-scan.result }}\n- Tests: ${{ needs.unit-integration-tests.result }}\n- Build: ${{ needs.build-docker.result }}\n- E2E: ${{ needs.e2e-tests.result }}\n\n[View Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
               labels: ['bug', 'ci/cd']
             })
-
