@@ -17,6 +17,10 @@ on:
           - stage
           - prod
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   JAVA_VERSION: '11'
   MAVEN_OPTS: '-Xmx3072m'
@@ -24,6 +28,7 @@ env:
   IMAGE_PREFIX: ${{ github.repository_owner }}/ecommerce
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
   ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
+  SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -65,6 +70,7 @@ jobs:
           args: >
             -Dsonar.projectKey=${{ github.repository }}
             -Dsonar.projectName=${{ github.repository }}
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
             -Dsonar.java.binaries=**/target/classes
             -Dsonar.sources=**/src/main
             -Dsonar.tests=**/src/test
@@ -127,7 +133,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
@@ -288,7 +294,7 @@ jobs:
         if: github.event_name != 'pull_request'
 
       - name: Upload Trivy image scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: 'trivy-image-${{ matrix.service }}.sarif'
