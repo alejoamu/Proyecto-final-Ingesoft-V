@@ -23,7 +23,6 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/ecommerce
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-  TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
   ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
 
 concurrency:
@@ -462,30 +461,6 @@ jobs:
             -H 'Content-type: application/json' \
             --data @slack_payload.json \
             "$SLACK_WEBHOOK_URL"
-
-      - name: Teams notification (Incoming Webhook)
-        if: always() && env.TEAMS_WEBHOOK_URL != ''
-        env:
-          TEAMS_WEBHOOK_URL: ${{ env.TEAMS_WEBHOOK_URL }}
-        run: |
-          echo "Calling Teams webhook: $TEAMS_WEBHOOK_URL"
-          PAYLOAD=$(jq -n \
-            --arg wf "${{ github.workflow }}" \
-            --arg st "${{ steps.status.outputs.status }}" \
-            --arg repo "${{ github.repository }}" \
-            --arg br "${{ github.ref_name }}" \
-            --arg actor "${{ github.actor }}" \
-            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            '{text: ("Workflow: " + $wf + "\nStatus: " + $st + "\nRepo: " + $repo + "\nBranch: " + $br + "\nActor: " + $actor + "\nRun: " + $url)}')
-
-          echo "Teams payload: $PAYLOAD"
-          STATUS=$(curl -s -o /tmp/teams_resp.txt -w "%{http_code}" \
-            -H 'Content-Type: application/json' \
-            -d "$PAYLOAD" \
-            "$TEAMS_WEBHOOK_URL")
-          echo "Teams HTTP status: $STATUS"
-          echo "Teams response body:"
-          cat /tmp/teams_resp.txt
 
       - name: Create GitHub Issue on failure
         if: steps.status.outputs.status == 'failure' && env.ISSUE_TOKEN != ''

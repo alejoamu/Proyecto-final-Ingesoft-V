@@ -11,8 +11,6 @@ on:
 env:
   # Webhook Slack (tomado de secrets para entorno real)
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-  # Webhook Teams / Power Automate (tomado de secrets)
-  TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
 
 jobs:
   notify:
@@ -86,15 +84,3 @@ jobs:
         run: |
           PAYLOAD=$(jq -Rn --arg t "${{ github.event.workflow_run.name }}" --arg s "${{ steps.status.outputs.status }}" --arg repo "${{ github.repository }}" --arg branch "${{ github.ref_name }}" --arg actor "${{ github.actor }}" --arg snippet "${{ steps.snippet.outputs.snippet }}" '{text: ($t + " " + $s + " en " + $repo + "@" + $branch + " por " + $actor + "\nSnippet de errores:\n```" + $snippet + "```")}')
           curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
-
-      - name: Teams/PowerAutomate notification (from secret)
-        if: always() && env.TEAMS_WEBHOOK_URL != ''
-        run: |
-          curl -H 'Content-Type: application/json' -d '{
-            "workflow":"${{ github.event.workflow_run.name }}",
-            "status":"${{ github.event.workflow_run.conclusion }}",
-            "repository":"${{ github.repository }}",
-            "branch":"${{ github.ref_name }}",
-            "actor":"${{ github.actor }}",
-            "run_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          }' "$TEAMS_WEBHOOK_URL"
