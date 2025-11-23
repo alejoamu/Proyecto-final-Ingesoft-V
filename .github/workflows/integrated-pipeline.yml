@@ -2,9 +2,11 @@ name: Integrated CI/CD Pipeline
 
 on:
   push:
+
     branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack ]
   pull_request:
     branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack ]
+
   workflow_dispatch:
     inputs:
       environment:

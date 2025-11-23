@@ -7,6 +7,7 @@ on:
       - master
       - develop
       - stage
+      - FEAT/Release-notes
 
 jobs:
   release:
@@ -26,11 +27,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install semantic-release
-        run: npm i -g semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/commit-analyzer @semantic-release/release-notes-generator
+      - name: Install semantic-release and plugins
+        run: |
+          npm i -g semantic-release \
+            @semantic-release/changelog \
+            @semantic-release/git \
+            @semantic-release/github \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            conventional-changelog-conventionalcommits
 
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: semantic-release
-
