@@ -2,9 +2,9 @@ name: Integrated CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack ]
+    branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
   pull_request:
-    branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack ]
+    branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
   workflow_dispatch:
     inputs:
       environment:
