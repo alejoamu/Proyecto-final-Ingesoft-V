@@ -53,6 +53,17 @@ jobs:
           cd ..
         done
 
+    - name: Build with coverage reports
+      run: |
+        echo "Building project and generating coverage reports..."
+        ./mvnw clean verify -DskipTests=false
+
+    - name: SonarQube Scan
+      uses: SonarSource/sonarqube-scan-action@v6
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
     - name: Install Newman
       run: |
         echo "Installing Newman..."
