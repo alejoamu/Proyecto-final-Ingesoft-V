@@ -2,9 +2,9 @@ name: Integrated CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master, develop, stage, staging ]
+    branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
   pull_request:
-    branches: [ main, master, develop, stage ]
+    branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
   workflow_dispatch:
     inputs:
       environment:
@@ -17,11 +17,18 @@ on:
           - stage
           - prod
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   JAVA_VERSION: '11'
   MAVEN_OPTS: '-Xmx3072m'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/ecommerce
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
+  SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,7 +43,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for better analysis
+          fetch-depth: 0
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -61,13 +68,9 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           args: >
-            -Dsonar.projectKey=${{ github.repository }}
-            -Dsonar.projectName=${{ github.repository }}
-            -Dsonar.java.binaries=**/target/classes
-            -Dsonar.sources=**/src/main
-            -Dsonar.tests=**/src/test
-            -Dsonar.junit.reportPaths=**/target/surefire-reports
-            -Dsonar.coverage.jacoco.xmlReportPaths=**/target/site/jacoco/jacoco.xml
+            -Dsonar.projectKey=ecommerce-microservice-backend
+            -Dsonar.projectName=ecommerce-microservice-backend
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
 
       - name: SonarQube Quality Gate Check
         uses: sonarsource/sonarqube-quality-gate-action@master
@@ -125,7 +128,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
@@ -286,7 +289,7 @@ jobs:
         if: github.event_name != 'pull_request'
 
       - name: Upload Trivy image scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: 'trivy-image-${{ matrix.service }}.sarif'
@@ -371,13 +374,11 @@ jobs:
       - name: Deploy to Kubernetes (Stage)
         run: |
           echo "Deploying to stage environment..."
-          # Add your deployment commands here
           # kubectl apply -k k8s -n stage
 
       - name: Health check
         run: |
           echo "Performing health checks..."
-          # Add health check commands
 
   # ==================== JOB 8: DEPLOY TO PROD (with approval) ====================
   deploy-prod:
@@ -395,13 +396,11 @@ jobs:
       - name: Deploy to Kubernetes (Production)
         run: |
           echo "Deploying to production environment..."
-          # Add your deployment commands here
           # kubectl apply -k k8s -n production
 
       - name: Health check
         run: |
           echo "Performing health checks..."
-          # Add health check commands
 
   # ==================== JOB 9: NOTIFICATIONS ====================
   notify:
@@ -425,70 +424,52 @@ jobs:
             echo "message=Pipeline completed successfully!" >> $GITHUB_OUTPUT
           fi
 
-      - name: Send Email Notification (on failure)
-        if: steps.status.outputs.status == 'failure'
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: '🚨 Pipeline Failed: ${{ github.repository }}'
-          to: ${{ secrets.NOTIFICATION_EMAIL }}
-          from: 'CI/CD Pipeline'
-          body: |
-            Pipeline failed for repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
-            Author: ${{ github.actor }}
-            Workflow: ${{ github.workflow }}
-            Run: ${{ github.run_number }}
-            
-            Failed jobs:
-            - Code Quality: ${{ needs.code-quality.result }}
-            - Security Scan: ${{ needs.security-scan.result }}
-            - Tests: ${{ needs.unit-integration-tests.result }}
-            - Build: ${{ needs.build-docker.result }}
-            - E2E: ${{ needs.e2e-tests.result }}
-            
-            View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-      - name: Send Slack Notification
-        if: always()
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          payload: |
-            {
-              "text": "${{ steps.status.outputs.status == 'failure' && '🚨 Pipeline Failed' || '✅ Pipeline Succeeded' }}",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*${{ steps.status.outputs.status == 'failure' && '🚨 Pipeline Failed' || '✅ Pipeline Succeeded' }}*\n\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\nAuthor: ${{ github.actor }}\n\n${{ steps.status.outputs.message }}"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Run"
-                      },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
-                  ]
+      - name: Send Slack Notification (via webhook)
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+        run: |
+          cat << 'EOF' > slack_payload.json
+          {
+            "text": "${{ steps.status.outputs.status == 'failure' && '🚨 Pipeline Failed' || '✅ Pipeline Succeeded' }}",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*${{ steps.status.outputs.status == 'failure' && '🚨 Pipeline Failed' || '✅ Pipeline Succeeded' }}*\n\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\nAuthor: ${{ github.actor }}\n\n${{ steps.status.outputs.message }}"
                 }
-              ]
-            }
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "View Run"
+                    },
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          echo "Calling Slack webhook: $SLACK_WEBHOOK_URL"
+          curl -v -X POST \
+            -H 'Content-type: application/json' \
+            --data @slack_payload.json \
+            "$SLACK_WEBHOOK_URL"
 
       - name: Create GitHub Issue on failure
-        if: steps.status.outputs.status == 'failure'
+        if: steps.status.outputs.status == 'failure' && env.ISSUE_TOKEN != ''
         uses: actions/github-script@v7
+        env:
+          ISSUE_TOKEN: ${{ env.ISSUE_TOKEN }}
         with:
+          github-token: ${{ env.ISSUE_TOKEN }}
           script: |
             github.rest.issues.create({
               owner: context.repo.owner,
@@ -497,4 +478,3 @@ jobs:
               body: `Pipeline failed for commit ${context.sha}\n\n**Branch:** ${context.ref}\n**Author:** ${context.actor}\n**Workflow:** ${context.workflow}\n\n**Failed Jobs:**\n- Code Quality: ${{ needs.code-quality.result }}\n- Security Scan: ${{ needs.security-scan.result }}\n- Tests: ${{ needs.unit-integration-tests.result }}\n- Build: ${{ needs.build-docker.result }}\n- E2E: ${{ needs.e2e-tests.result }}\n\n[View Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
               labels: ['bug', 'ci/cd']
             })
-

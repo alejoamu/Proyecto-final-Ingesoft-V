@@ -1,0 +1,86 @@
+name: Notifications
+
+on:
+  workflow_run:
+    workflows:
+      - Integrated CI/CD Pipeline
+      - Code Quality & Security
+    types:
+      - completed
+
+env:
+  # Webhook Slack (tomado de secrets para entorno real)
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Set status
+        id: status
+        run: |
+          if [ "${{ github.event.workflow_run.conclusion }}" = "success" ]; then
+            echo "status=PASSED" >> $GITHUB_OUTPUT
+          else
+            echo "status=FAILED" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Descargar y extraer logs (solo si falla)
+        if: steps.status.outputs.status == 'FAILED'
+        env:
+          LOGS_URL: ${{ github.event.workflow_run.logs_url }}
+        run: |
+          echo "Logs URL: $LOGS_URL"
+          curl -L -H "Authorization: Bearer $GITHUB_TOKEN" -o logs.zip "$LOGS_URL"
+          unzip -q logs.zip -d logs
+          echo "Archivos de log extraídos:" && ls -1 logs | head -n 20
+
+      - name: Generar snippet de fallos
+        if: steps.status.outputs.status == 'FAILED'
+        id: snippet
+        run: |
+          # Buscar patrones comunes de error en todos los .txt
+          MAX_LINES=200
+          PATTERN='ERROR|Error|FAIL|Fail|::error'
+          mkdir -p distilled
+          for f in logs/*.txt; do
+            grep -E "$PATTERN" "$f" | head -n $MAX_LINES >> distilled/failures.txt || true
+          done
+          if [ -f distilled/failures.txt ]; then
+            # Limitar tamaño (Slack/Teams)
+            head -c 8000 distilled/failures.txt > distilled/failures_truncated.txt
+            echo 'found=true' >> $GITHUB_OUTPUT
+            # Escapar comillas para JSON
+            SNIPPET=$(sed 's/"/\\"/g' distilled/failures_truncated.txt | sed 's/$/\\n/' | tr -d '\r')
+            echo "snippet=$SNIPPET" >> $GITHUB_OUTPUT
+          else
+            echo 'found=false' >> $GITHUB_OUTPUT
+            echo 'snippet=No se encontraron líneas con patrones de error.' >> $GITHUB_OUTPUT
+          fi
+
+      - name: Slack notification (from secret)
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "Workflow '${{ github.event.workflow_run.name }}' ${{ steps.status.outputs.status }} en ${{ github.repository }}@${{ github.ref_name }}.",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {"type": "mrkdwn", "text": "*${{ github.event.workflow_run.name }}* finalizado con *${{ steps.status.outputs.status }}*\nRepositorio: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nActor: ${{ github.actor }}\nRun: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Ver ejecución>"}
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+      - name: Enviar snippet separado a Slack si falló
+        if: steps.status.outputs.status == 'FAILED' && env.SLACK_WEBHOOK_URL != ''
+        run: |
+          PAYLOAD=$(jq -Rn --arg t "${{ github.event.workflow_run.name }}" --arg s "${{ steps.status.outputs.status }}" --arg repo "${{ github.repository }}" --arg branch "${{ github.ref_name }}" --arg actor "${{ github.actor }}" --arg snippet "${{ steps.snippet.outputs.snippet }}" '{text: ($t + " " + $s + " en " + $repo + "@" + $branch + " por " + $actor + "\nSnippet de errores:\n```" + $snippet + "```")}')
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"

@@ -1,0 +1,66 @@
+name: Generate Release Notes Draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Rama sobre la que generar release notes (main/master)'
+        required: true
+        default: 'main'
+      previous_tag:
+        description: 'Tag anterior (opcional, detecta automáticamente si vacío)'
+        required: false
+        default: ''
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine previous tag
+        id: prev
+        run: |
+          if [ -n "${{ github.event.inputs.previous_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.previous_tag }}" >> $GITHUB_OUTPUT
+          else
+            LAST=$(git describe --tags --abbrev=0 || echo '')
+            echo "tag=$LAST" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate notes
+        id: notes
+        run: |
+          FROM=${{ steps.prev.outputs.tag }}
+          if [ -z "$FROM" ]; then
+            echo "No previous tag, tomando todos los commits" >&2
+            git log --pretty=format:'- %s (%h)' > RELEASE_NOTES_DRAFT.md
+          else
+            git log $FROM..${{ github.event.inputs.target_branch }} --pretty=format:'- %s (%h)' > RELEASE_NOTES_DRAFT.md
+          fi
+          echo "draft<<EOF" >> $GITHUB_OUTPUT
+          cat RELEASE_NOTES_DRAFT.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes-draft
+          path: RELEASE_NOTES_DRAFT.md
+
+      - name: Crear issue con borrador (opcional)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const draft = `# Draft Release Notes\n${{ steps.notes.outputs.draft }}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Release Notes Draft',
+              body: draft,
+              labels: ['release','draft']
+            });
+
