@@ -123,7 +123,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 2: SECURITY SCAN (Trivy) ====================
   security-scan:
@@ -235,7 +234,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 3: SEMANTIC VERSIONING ====================
   semantic-version:
@@ -308,7 +306,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 4: UNIT & INTEGRATION TESTS ====================
   unit-integration-tests:
@@ -407,7 +404,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 5: BUILD DOCKER IMAGES ====================
   build-docker:
@@ -527,7 +523,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 6: E2E TESTS ====================
   e2e-tests:
@@ -635,7 +630,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 7: DEPLOY TO STAGE (with approval) ====================
   deploy-stage:
@@ -701,7 +695,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 8: DEPLOY TO PROD (with approval) ====================
   deploy-prod:
@@ -767,7 +760,6 @@ jobs:
               ]}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
   # ==================== JOB 9: NOTIFICATIONS ====================
   notify:
