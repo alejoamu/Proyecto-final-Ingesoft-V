@@ -335,7 +335,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-**Última actualización**: 2025-01-XX
+**Última actualización**: 2025-11-23
 
 
 
