@@ -463,21 +463,27 @@ jobs:
             --data @slack_payload.json \
             "$SLACK_WEBHOOK_URL"
 
-      - name: Teams/PowerAutomate notification (from secret)
+      - name: Teams notification (Incoming Webhook)
         if: always() && env.TEAMS_WEBHOOK_URL != ''
         env:
           TEAMS_WEBHOOK_URL: ${{ env.TEAMS_WEBHOOK_URL }}
         run: |
           echo "Calling Teams webhook: $TEAMS_WEBHOOK_URL"
-          RESPONSE=$(curl -s -o /tmp/teams_resp.txt -w "%{http_code}" -H 'Content-Type: application/json' -d '{
-            "workflow":"${{ github.workflow }}",
-            "status":"${{ steps.status.outputs.status }}",
-            "repository":"${{ github.repository }}",
-            "branch":"${{ github.ref_name }}",
-            "actor":"${{ github.actor }}",
-            "run_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          }' "$TEAMS_WEBHOOK_URL")
-          echo "Teams HTTP status: $RESPONSE"
+          PAYLOAD=$(jq -n \
+            --arg wf "${{ github.workflow }}" \
+            --arg st "${{ steps.status.outputs.status }}" \
+            --arg repo "${{ github.repository }}" \
+            --arg br "${{ github.ref_name }}" \
+            --arg actor "${{ github.actor }}" \
+            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{text: ("Workflow: " + $wf + "\nStatus: " + $st + "\nRepo: " + $repo + "\nBranch: " + $br + "\nActor: " + $actor + "\nRun: " + $url)}')
+
+          echo "Teams payload: $PAYLOAD"
+          STATUS=$(curl -s -o /tmp/teams_resp.txt -w "%{http_code}" \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD" \
+            "$TEAMS_WEBHOOK_URL")
+          echo "Teams HTTP status: $STATUS"
           echo "Teams response body:"
           cat /tmp/teams_resp.txt
 
