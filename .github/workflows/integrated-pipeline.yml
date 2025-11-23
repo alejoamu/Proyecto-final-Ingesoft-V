@@ -2,9 +2,9 @@ name: Integrated CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master, develop, stage, staging ]
+    branches: [ main, master, develop, stage, staging, FEAT/Release-notes ]
   pull_request:
-    branches: [ main, master, develop, stage ]
+    branches: [ main, master, develop, stage, FEAT/Release-notes ]
   workflow_dispatch:
     inputs:
       environment:
