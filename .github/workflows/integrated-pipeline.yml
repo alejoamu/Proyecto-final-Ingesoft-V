@@ -43,7 +43,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for better analysis
+          fetch-depth: 0
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -68,14 +68,9 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           args: >
-            -Dsonar.projectKey=${{ github.repository }}
-            -Dsonar.projectName=${{ github.repository }}
+            -Dsonar.projectKey=ecommerce-microservice-backend
+            -Dsonar.projectName=ecommerce-microservice-backend
             -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
-            -Dsonar.java.binaries=**/target/classes
-            -Dsonar.sources=**/src/main
-            -Dsonar.tests=**/src/test
-            -Dsonar.junit.reportPaths=**/target/surefire-reports
-            -Dsonar.coverage.jacoco.xmlReportPaths=**/target/site/jacoco/jacoco.xml
 
       - name: SonarQube Quality Gate Check
         uses: sonarsource/sonarqube-quality-gate-action@master
