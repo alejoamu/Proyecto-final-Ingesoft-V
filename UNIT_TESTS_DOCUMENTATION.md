@@ -1,10 +1,10 @@
-# 📋 Documentación de Tests Unitarios - Microservicios E-commerce
+#  Documentación de Tests Unitarios - Microservicios E-commerce
 
 Este documento explica qué está probando cada test unitario en cada microservicio del sistema e-commerce.
 
 ---
 
-## 📦 Product Service (`product-service`)
+##  Product Service (`product-service`)
 
 ### Tests Unitarios (`ProductServiceTest.java`)
 
