@@ -456,27 +456,37 @@ jobs:
           }
           EOF
 
-          curl -X POST \
+          echo "Calling Slack webhook: $SLACK_WEBHOOK_URL"
+          curl -v -X POST \
             -H 'Content-type: application/json' \
             --data @slack_payload.json \
             "$SLACK_WEBHOOK_URL"
 
       - name: Teams/PowerAutomate notification (from secret)
         if: always() && env.TEAMS_WEBHOOK_URL != ''
+        env:
+          TEAMS_WEBHOOK_URL: ${{ env.TEAMS_WEBHOOK_URL }}
         run: |
-          curl -H 'Content-Type: application/json' -d '{
+          echo "Calling Teams webhook: $TEAMS_WEBHOOK_URL"
+          RESPONSE=$(curl -s -o /tmp/teams_resp.txt -w "%{http_code}" -H 'Content-Type: application/json' -d '{
             "workflow":"${{ github.workflow }}",
             "status":"${{ steps.status.outputs.status }}",
             "repository":"${{ github.repository }}",
             "branch":"${{ github.ref_name }}",
             "actor":"${{ github.actor }}",
             "run_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          }' "$TEAMS_WEBHOOK_URL"
+          }' "$TEAMS_WEBHOOK_URL")
+          echo "Teams HTTP status: $RESPONSE"
+          echo "Teams response body:"
+          cat /tmp/teams_resp.txt
 
       - name: Create GitHub Issue on failure
-        if: steps.status.outputs.status == 'failure'
+        if: steps.status.outputs.status == 'failure' && secrets.ISSUE_TOKEN != ''
         uses: actions/github-script@v7
+        env:
+          ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
         with:
+          github-token: ${{ env.ISSUE_TOKEN }}
           script: |
             github.rest.issues.create({
               owner: context.repo.owner,
