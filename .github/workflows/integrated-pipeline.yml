@@ -22,6 +22,8 @@ env:
   MAVEN_OPTS: '-Xmx3072m'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/ecommerce
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -790,10 +792,10 @@ jobs:
           fi
 
       - name: Send Slack Notification (from secret)
-        if: always() && secrets.SLACK_WEBHOOK_URL != ''
+        if: always() && env.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
         with:
           payload: |
             {
@@ -823,7 +825,7 @@ jobs:
             }
 
       - name: Teams/PowerAutomate notification (from secret)
-        if: always() && secrets.TEAMS_WEBHOOK_URL != ''
+        if: always() && env.TEAMS_WEBHOOK_URL != ''
         run: |
           curl -H 'Content-Type: application/json' -d '{
             "workflow":"${{ github.workflow }}",
@@ -832,7 +834,7 @@ jobs:
             "branch":"${{ github.ref_name }}",
             "actor":"${{ github.actor }}",
             "run_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          }' "${{ secrets.TEAMS_WEBHOOK_URL }}"
+          }' "$TEAMS_WEBHOOK_URL"
 
       - name: Create GitHub Issue on failure
         if: steps.status.outputs.status == 'failure'
