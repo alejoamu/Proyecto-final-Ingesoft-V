@@ -22,8 +22,6 @@ env:
   MAVEN_OPTS: '-Xmx3072m'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/ecommerce
-  # Webhook Slack quemado solo para entorno académico (no usar en prod real)
-  BURNED_SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -791,40 +789,11 @@ jobs:
             echo "message=Pipeline completed successfully!" >> $GITHUB_OUTPUT
           fi
 
-      # Email desactivado por defecto (no hay secrets en entorno académico)
-      # - name: Send Email Notification (on failure)
-      #   if: steps.status.outputs.status == 'failure'
-      #   uses: dawidd6/action-send-mail@v3
-      #   with:
-      #     server_address: smtp.gmail.com
-      #     server_port: 465
-      #     username: ${{ secrets.EMAIL_USERNAME }}
-      #     password: ${{ secrets.EMAIL_PASSWORD }}
-      #     subject: '🚨 Pipeline Failed: ${{ github.repository }}'
-      #     to: ${{ secrets.NOTIFICATION_EMAIL }}
-      #     from: 'CI/CD Pipeline'
-      #     body: |
-      #       Pipeline failed for repository: ${{ github.repository }}
-      #       Branch: ${{ github.ref_name }}
-      #       Commit: ${{ github.sha }}
-      #       Author: ${{ github.actor }}
-      #       Workflow: ${{ github.workflow }}
-      #       Run: ${{ github.run_number }}
-      #
-      #       Failed jobs:
-      #       - Code Quality: ${{ needs.code-quality.result }}
-      #       - Security Scan: ${{ needs.security-scan.result }}
-      #       - Tests: ${{ needs.unit-integration-tests.result }}
-      #       - Build: ${{ needs.build-docker.result }}
-      #       - E2E: ${{ needs.e2e-tests.result }}
-      #
-      #       View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-      - name: Send Slack Notification (burned webhook)
-        if: always()
+      - name: Send Slack Notification (from secret)
+        if: always() && secrets.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1
         env:
-          SLACK_WEBHOOK_URL: ${{ env.BURNED_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           payload: |
             {
@@ -852,6 +821,18 @@ jobs:
                 }
               ]
             }
+
+      - name: Teams/PowerAutomate notification (from secret)
+        if: always() && secrets.TEAMS_WEBHOOK_URL != ''
+        run: |
+          curl -H 'Content-Type: application/json' -d '{
+            "workflow":"${{ github.workflow }}",
+            "status":"${{ steps.status.outputs.status }}",
+            "repository":"${{ github.repository }}",
+            "branch":"${{ github.ref_name }}",
+            "actor":"${{ github.actor }}",
+            "run_url":"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }' "${{ secrets.TEAMS_WEBHOOK_URL }}"
 
       - name: Create GitHub Issue on failure
         if: steps.status.outputs.status == 'failure'
