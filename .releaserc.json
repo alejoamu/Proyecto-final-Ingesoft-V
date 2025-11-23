@@ -9,6 +9,10 @@
     {
       "name": "stage",
       "prerelease": "rc"
+    },
+    {
+      "name": "FEAT/Release-notes",
+      "prerelease": "notes"
     }
   ],
   "tagFormat": "v${version}",
