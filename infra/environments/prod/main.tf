@@ -5,6 +5,10 @@ terraform {
     container_name       = "tfstate"
     key                  = "prod.tfstate"
   }
+
+  backend "local" {
+    path = "./terraform.tfstate"
+  }
 }
 
 module "network" {
@@ -56,4 +60,3 @@ module "traffic_manager" {
   primary_fqdn        = "primary-prod.example.com"
   secondary_fqdn      = "secondary-prod.example.com"
 }
-

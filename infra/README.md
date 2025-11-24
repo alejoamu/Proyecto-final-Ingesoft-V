@@ -1,17 +1,18 @@
 # Terraform Infrastructure
 
-Este directorio contiene la infraestructura como código modular para Azure (y recursos auxiliares multi-cloud) organizada por ambientes: `dev`, `stage`, `prod`.
+Este directorio contiene la infraestructura como código modular para **Azure** organizada por ambientes: `dev`, `stage`, `prod`.
 
 ## Estructura
 ```
 infra/
   providers.tf
   variables.tf (legacy root vars)
+  backend_bootstrap.tf  # Bootstrap opcional para crear el backend de Terraform en Azure
   modules/
-    network/        # RG, VNet, Subnet
-    vm/             # Public IP, NIC, Linux VM
-    security/       # Network Security Group parametrizable
-    backup/         # Bucket S3 (simulación backup cross-cloud)
+    network/        # RG, VNet, Subnet en Azure
+    vm/             # Public IP, NIC, Linux VM en Azure
+    security/       # Network Security Group parametrizable en Azure
+    backup/         # Módulo legacy (sin uso actual)
     traffic_manager/# Azure Traffic Manager endpoints externos
   environments/
     dev/
@@ -22,52 +23,55 @@ infra/
 ## Objetivos Implementados
 - Modularización: separación de red, seguridad, cómputo, backup y balanceo.
 - Multi-ambiente: carpetas `dev`, `stage`, `prod` con su propio `main.tf` y backend remoto (state).
-- Backend remoto: configurado (placeholder) en cada ambiente para usar Azure Storage (ajusta RG, storage y container reales antes de `terraform init`).
-- Estrategia de respaldo: módulo `backup` simula exportación de metadatos de VMs hacia S3 (multi-cloud). Puede extenderse a Recovery Services o Data Factory.
-- Balanceo multi-región/proveedor: módulo `traffic_manager` crea perfil de Azure Traffic Manager con endpoints externos (simulados) para failover.
+- Backend remoto: se puede crear y gestionar de forma automatizada con Terraform (`backend_bootstrap.tf`), evitando pasos manuales en Azure CLI.
 - Seguridad parametrizable: reglas definidas en `modules/security` con lista dinámica.
 
-## Pre-requisitos
-1. Crear Storage Account para estados remotos:
+## Flujo de uso recomendado
+
+### 1. (Opcional) Bootstrap del backend de Terraform en Azure
+
+criocAntes de usar los entornos, puedes crear automáticamente el Resource Group y Storage Account para el estado remoto. Para ello, usa el proyecto de bootstrap:
+
 ```bash
-az group create -n tfstate-rg -l eastus
-az storage account create -n tfstateaccount -g tfstate-rg -l eastus --sku Standard_LRS
-az storage container create --name tfstate --account-name tfstateaccount
-```
-2. Exportar credenciales Azure (si usas Service Principal):
-```bash
-export ARM_CLIENT_ID=xxxx
-export ARM_CLIENT_SECRET=xxxx
-export ARM_TENANT_ID=xxxx
-export ARM_SUBSCRIPTION_ID=xxxx
-```
-3. (Opcional AWS para backup):
-```bash
-export AWS_ACCESS_KEY_ID=xxx
-export AWS_SECRET_ACCESS_KEY=xxx
-export AWS_REGION=us-east-1
+cd infra/backend-bootstrap
+terraform init
+terraform apply \
+  -var="backend_location=mexicocentral" \
+  -var="backend_resource_group_name=tfstate-rg" \
+  -var="backend_storage_account_name=tfstateaccount" \
+  -var="backend_container_name=tfstate"
 ```
 
-## Uso por Ambiente
+Al finalizar, ya existirán `tfstate-rg`, `tfstateaccount` y `tfstate`, que son los valores usados en los bloques backend `azurerm` de los entornos.
+
+> Si ya tienes creado el backend (por ejemplo, en otra práctica), puedes saltarte este paso o volver a aplicar aquí para recrearlo.
+
+### 2. Desplegar un entorno (dev/stage/prod)
+
 Dentro de `infra/environments/<env>`:
+
 ```bash
 cd infra/environments/dev
 terraform init
-terraform plan -var="region=eastus" -var="prefix_name=ecdev" -var="servers=[\"devops1\",\"devops2\"]" -var="user=adminuser" -var="password=SuperSegura123" -out plan.tfplan
+terraform plan -var="region=mexicocentral" -var="prefix_name=ecdev" -var="servers=[\"devops1\",\"devops2\"]" -var="user=adminuser" -var="password=SuperSegura123" -out plan.tfplan
 terraform apply plan.tfplan
 ```
+
 Para stage:
+
 ```bash
 cd infra/environments/stage
 terraform init
-terraform plan -var="region=centralus" -var="prefix_name=ecstage" -var="servers=[\"stage1\"]" -var="user=adminuser" -var="password=OtroPass123" -out plan.tfplan
+terraform plan -var="region=mexicocentral" -var="prefix_name=ecstage" -var="servers=[\"stage1\"]" -var="user=adminuser" -var="password=OtroPass123" -out plan.tfplan
 terraform apply plan.tfplan
 ```
+
 Para prod (ejemplo multi subnet y tamaño distinto):
+
 ```bash
 cd infra/environments/prod
 terraform init
-terraform plan -var="region=eastus2" -var="prefix_name=ecprod" -var="servers=[\"prod1\",\"prod2\",\"prod3\"]" -var="user=adminuser" -var="password=ProdPass123!" -out plan.tfplan
+terraform plan -var="region=mexicocentral" -var="prefix_name=ecprod" -var="servers=[\"prod1\",\"prod2\",\"prod3\"]" -var="user=adminuser" -var="password=ProdPass123!" -out plan.tfplan
 terraform apply plan.tfplan
 ```
 
@@ -75,41 +79,13 @@ terraform apply plan.tfplan
 - `modules/vm` expone `public_ips` y `vm_ids` (en root legacy o extender outputs en ambientes si se requiere).
 - `modules/network` entrega `resource_group_name`, `location`, `subnet_id`.
 - `modules/security` entrega `nsg_id` (puedes asociarlo a NICs si extiendes módulo vm).
-- `modules/backup` `backup_bucket_name` para verificación cross-cloud.
 - `modules/traffic_manager` `traffic_manager_dns_name` para endpoint global.
 
 ## Extensiones Sugeridas
 - Asociar NSG a NICs: añadir recurso `azurerm_network_interface_security_group_association` en ambientes usando `for_each` sobre NICS del módulo vm.
-- Recovery Services Vault: reemplazar el módulo `backup` por configuración real en Azure + replicación geo.
+- Recovery Services Vault: reemplazar el módulo `backup` legacy por configuración real en Azure + replicación geo.
 - Private Endpoints y Firewall: agregar módulos para reforzar seguridad en producción.
 - Observabilidad: módulo de Log Analytics + Diagnostic Settings para VMs.
-
-## Balanceo Entre Proveedores
-La configuración actual crea un perfil de Traffic Manager con endpoints externos. Para balanceo real entre nubes:
-1. Aprovisionar un segundo stack (ej. en AWS con ALB / EC2) y obtener su FQDN.
-2. Actualizar `primary_fqdn` y `secondary_fqdn` (prod) con los FQDN reales.
-3. Cambiar método de enrutamiento a `Performance` o `Priority` según necesidad.
-
-## Estrategia de Respaldo Multi-Cloud
-- Actualmente se simula exportando metadatos de VMs a S3.
-- Producción real: usar Azure Backup / Snapshot + replicación incremental a segunda región y exportar snapshots periódicos a S3 (requiere tooling adicional).
-- Validar integridad: scripts Lambda o funciones Azure que verifiquen objetos.
-
-## Diagrama (Descripción)
-```
-+----------------------+          +----------------------+
-|  Azure RG (env)      |          |    AWS Account       |
-|  - VNet/Subnet       |          |  S3 Bucket (backup)  |
-|  - NSG (rules)       |          +----------+-----------+
-|  - VMs (Linux)       |                     ^
-|  - Traffic Manager --+----(DNS Failover)---+
-|                      |                     |
-|  Storage Account     |<---- remote state-->|
-+----------------------+                     |
-             ^                                |
-             | Terraform Backend              |
-             +--------------------------------+
-```
 
 ## Seguridad
 - No commit de credenciales en archivos `.tfvars`.
@@ -119,7 +95,7 @@ La configuración actual crea un perfil de Traffic Manager con endpoints externo
 
 ## Limpieza
 ```bash
-terraform destroy -var="region=eastus" -var="prefix_name=ecdev" -var="servers=[\"devops1\",\"devops2\"]" -var="user=adminuser" -var="password=SuperSegura123"
+terraform destroy -var="region=mexicocentral" -var="prefix_name=ecdev" -var="servers=[\"devops1\",\"devops2\"]" -var="user=adminuser" -var="password=SuperSegura123"
 ```
 
 ## Migración Legacy Root

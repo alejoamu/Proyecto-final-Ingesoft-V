@@ -1,9 +1,6 @@
 terraform {
-  backend "azurerm" {
-    resource_group_name  = "tfstate-rg"
-    storage_account_name = "tfstateaccount"
-    container_name       = "tfstate"
-    key                  = "stage.tfstate"
+  backend "local" {
+    path = "./terraform.tfstate"
   }
 }
 
@@ -49,4 +46,3 @@ module "traffic_manager" {
   primary_fqdn        = "primary-stage.example.com"
   secondary_fqdn      = "secondary-stage.example.com"
 }
-

@@ -1,10 +1,12 @@
 terraform {
-  backend "azurerm" {
-    resource_group_name  = "tfstate-rg"
-    storage_account_name = "tfstateaccount"
-    container_name       = "tfstate"
-    key                  = "dev.tfstate"
+  backend "local" {
+    path = "./terraform.tfstate"
   }
+}
+
+provider "azurerm" {
+  features {}
+  subscription_id = "52aed73f-daaf-4e1b-8cc5-a1975f49cd85"
 }
 
 module "network" {
@@ -33,14 +35,6 @@ module "vm" {
   password            = var.password
 }
 
-module "backup" {
-  source       = "../../modules/backup"
-  prefix       = var.prefix_name
-  env          = "dev"
-  azure_region = var.region
-  vm_names     = var.servers
-}
-
 module "traffic_manager" {
   source              = "../../modules/traffic_manager"
   prefix              = var.prefix_name
@@ -49,4 +43,3 @@ module "traffic_manager" {
   primary_fqdn        = "primary-dev.example.com"
   secondary_fqdn      = "secondary-dev.example.com"
 }
-
