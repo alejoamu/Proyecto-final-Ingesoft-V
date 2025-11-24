@@ -1308,7 +1308,7 @@ Las métricas expuestas incluyen:
 
 **Dashboard principal:** "Ecommerce Microservices - Overview"
 
-Incluye los siguientes paneles:
+Vista general de todos los servicios con paneles agregados. Incluye:
 1. **HTTP Request Rate by Service** - Tasa de solicitudes por segundo por servicio
 2. **HTTP Request Latency** - Latencia de solicitudes (percentiles 50, 95, 99)
 3. **HTTP Success Rate** - Tasa de éxito (códigos 2xx)
@@ -1317,10 +1317,95 @@ Incluye los siguientes paneles:
 6. **Retry Attempts** - Intentos de retry por servicio
 7. **Service Health Status** - Estado de salud de todos los servicios
 
+**Dashboards específicos por servicio:**
+
+Cada microservicio tiene su propio dashboard detallado con métricas relevantes:
+
+1. **API Gateway Dashboard** (`api-gateway.json`)
+   - Request Rate y Latency por endpoint
+   - HTTP Status Codes
+   - Circuit Breaker Status
+   - Requests por ruta configurada
+   - JVM Memory y CPU Usage
+
+2. **User Service Dashboard** (`user-service.json`)
+   - Métricas de autenticación y usuarios
+   - Latencia de operaciones CRUD
+   - Success Rate y Error Rate
+   - Circuit Breaker y Retry
+   - Métricas de JVM
+
+3. **Product Service Dashboard** (`product-service.json`)
+   - Métricas de catálogo de productos
+   - Requests por endpoint (GET, POST, PUT, DELETE)
+   - Latencia de búsquedas y consultas
+   - Circuit Breaker Status
+   - Métricas de rendimiento
+
+4. **Order Service Dashboard** (`order-service.json`)
+   - Métricas de procesamiento de órdenes
+   - Latencia de creación de órdenes
+   - Tasa de éxito de transacciones
+   - Circuit Breaker Status
+   - Métricas de JVM
+
+5. **Payment Service Dashboard** (`payment-service.json`)
+   - Métricas de procesamiento de pagos
+   - Latencia de transacciones
+   - Tasa de éxito de pagos
+   - Circuit Breaker Status (crítico para pagos)
+   - Métricas de seguridad
+
+6. **Shipping Service Dashboard** (`shipping-service.json`)
+   - Métricas de gestión de envíos
+   - Latencia de operaciones
+   - Success Rate
+   - Circuit Breaker Status
+   - Métricas de JVM
+
+7. **Favourite Service Dashboard** (`favourite-service.json`)
+   - Métricas de favoritos de usuarios
+   - Latencia de operaciones
+   - Success Rate
+   - Circuit Breaker Status
+   - Métricas de JVM
+
+8. **Proxy Client Dashboard** (`proxy-client.json`)
+   - Métricas de proxy y routing
+   - Latencia de llamadas entre servicios
+   - Circuit Breaker Status
+   - Retry Attempts
+   - Métricas de JVM
+
+**Cada dashboard de servicio incluye:**
+- **Request Rate (req/s)** - Tasa de solicitudes por segundo
+- **Request Latency (ms)** - Latencia p50, p95, p99
+- **Success Rate (%)** - Porcentaje de solicitudes exitosas (2xx)
+- **Error Rate (5xx)** - Tasa de errores del servidor
+- **HTTP Status Codes** - Distribución de códigos de estado
+- **Circuit Breaker Status** - Estado de circuit breakers del servicio
+- **JVM Memory Usage** - Uso de memoria heap
+- **CPU Usage (%)** - Uso de CPU del proceso
+- **Requests by Endpoint** - Solicitudes desglosadas por URI
+- **Service Health Status** - Estado de salud del servicio
+
+**Acceder a los dashboards:**
+1. Accede a Grafana (http://localhost:3000)
+2. Ve a Dashboards > Microservices
+3. Selecciona el dashboard del servicio que deseas visualizar
+
 **Personalizar dashboards:**
 1. Accede a Grafana (http://localhost:3000)
-2. Ve a Dashboards > Ecommerce Microservices
-3. Edita o crea nuevos paneles usando PromQL queries
+2. Ve a Dashboards > Microservices
+3. Selecciona el dashboard que deseas editar
+4. Haz clic en "Edit" para modificar paneles
+5. Usa PromQL queries para agregar nuevas métricas
+
+**Regenerar dashboards:**
+Si necesitas regenerar los dashboards (por ejemplo, después de agregar nuevos servicios), ejecuta:
+```bash
+python monitoring/grafana/scripts/create_service_dashboard.py
+```
 
 ### Consultas PromQL Útiles
 
@@ -1383,8 +1468,18 @@ monitoring/
     │   │   └── prometheus.yml  # Datasource de Prometheus
     │   └── dashboards/
     │       └── dashboard.yml   # Configuración de dashboards
-    └── dashboards/
-        └── microservices-overview.json  # Dashboard principal
+    ├── dashboards/
+    │   ├── microservices-overview.json  # Dashboard principal (overview)
+    │   ├── api-gateway.json             # Dashboard API Gateway
+    │   ├── user-service.json            # Dashboard User Service
+    │   ├── product-service.json         # Dashboard Product Service
+    │   ├── order-service.json           # Dashboard Order Service
+    │   ├── payment-service.json         # Dashboard Payment Service
+    │   ├── shipping-service.json        # Dashboard Shipping Service
+    │   ├── favourite-service.json       # Dashboard Favourite Service
+    │   └── proxy-client.json            # Dashboard Proxy Client
+    └── scripts/
+        └── create_service_dashboard.py  # Script para generar dashboards
 ```
 
 **Manifiestos Kubernetes:**
