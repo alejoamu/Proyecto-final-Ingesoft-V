@@ -53,6 +53,18 @@ jobs:
           cd ..
         done
 
+    - name: Build with coverage reports
+      run: |
+        echo "Building project and generating coverage reports..."
+        ./mvnw clean verify -DskipTests=false
+
+    - name: SonarQube Scan
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+      run: ./mvnw -B sonar:sonar -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.login=${{ secrets.SONAR_TOKEN }} -Dsonar.projectKey=ecommerce-microservice-backend -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+
     - name: Install Newman
       run: |
         echo "Installing Newman..."
