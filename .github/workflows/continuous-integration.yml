@@ -5,6 +5,7 @@ on:
     branches: [ main, master, develop, staging ]
   pull_request:
     branches: [ main, master, develop ]
+  workflow_dispatch:
 
 env:
   MINIKUBE_VERSION: "1.32.0"
@@ -64,6 +65,16 @@ jobs:
         SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
       run: ./mvnw -B sonar:sonar -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.login=${{ secrets.SONAR_TOKEN }} -Dsonar.projectKey=ecommerce-microservice-backend -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+
+    # Quality Gate Check - desactivado temporalmente hasta verificar permisos del token
+    # El error 403 indica que el token no tiene permisos para acceder a la API de SonarCloud
+    # Para activarlo, asegúrate de que SONAR_TOKEN sea un User Token con permisos de API
+    # - name: SonarQube Quality Gate Check
+    #   uses: SonarSource/sonarqube-quality-gate-action@master
+    #   timeout-minutes: 5
+    #   env:
+    #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    #     SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
     - name: Install Newman
       run: |
