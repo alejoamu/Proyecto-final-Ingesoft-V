@@ -1188,3 +1188,205 @@ refreshables definidas (ej: `app.api.timeout`, `app.user.max-results`, etc.).
 ### Documentación Detallada
 
 Para más detalles sobre los patrones, consulta el archivo `Docs/PATRONES_DISENO.md` que contiene un análisis más profundo de los patrones y recomendaciones adicionales.
+
+## Observabilidad y Monitoreo
+
+Esta sección describe cómo implementar y usar el stack de monitoreo con Prometheus y Grafana para observar métricas de los microservicios.
+
+### Stack de Monitoreo: Prometheus + Grafana
+
+El proyecto incluye un stack completo de monitoreo implementado con:
+- **Prometheus**: Sistema de monitoreo y base de datos de series temporales
+- **Grafana**: Plataforma de visualización y dashboards
+- **Micrometer**: Métricas de Spring Boot expuestas en formato Prometheus
+
+### Configuración de Métricas en Microservicios
+
+Todos los microservicios están configurados para exponer métricas Prometheus a través del endpoint `/actuator/prometheus`:
+
+**Configuración en `application.yml`:**
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+```
+
+**Dependencias en `pom.xml`:**
+- `spring-boot-starter-actuator` - Endpoints de monitoreo
+- `micrometer-registry-prometheus` - Exportador de métricas Prometheus
+
+### Ejecutar con Docker Compose
+
+**1. Levantar servicios de monitoreo:**
+```bash
+docker network create microservices_network || true
+
+docker compose -f compose.yml up -d prometheus grafana
+```
+
+**2. Acceder a las interfaces:**
+
+- **Prometheus**: http://localhost:9090
+  - Consulta métricas directamente usando PromQL
+  - Ejemplo: `rate(http_server_requests_seconds_count[5m])`
+  
+- **Grafana**: http://localhost:3000
+  - Usuario: `admin`
+  - Contraseña: `admin`
+  - El dashboard "Ecommerce Microservices - Overview" se carga automáticamente
+
+**3. Endpoints de métricas de cada servicio:**
+
+```
+API Gateway:        http://localhost:8080/actuator/prometheus
+Proxy Client:       http://localhost:8900/app/actuator/prometheus
+User Service:       http://localhost:8700/user-service/actuator/prometheus
+Product Service:    http://localhost:8500/product-service/actuator/prometheus
+Order Service:      http://localhost:8300/order-service/actuator/prometheus
+Payment Service:    http://localhost:8400/payment-service/actuator/prometheus
+Shipping Service:   http://localhost:8600/shipping-service/actuator/prometheus
+Favourite Service:  http://localhost:8800/favourite-service/actuator/prometheus
+Service Discovery:  http://localhost:8761/actuator/prometheus
+Cloud Config:       http://localhost:9296/actuator/prometheus
+```
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de monitoreo:**
+```bash
+kubectl apply -f k8s/prometheus.yaml
+kubectl apply -f k8s/grafana.yaml
+
+kubectl get pods -n monitoring
+kubectl get svc -n monitoring
+```
+
+**2. Acceder a los servicios:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n monitoring svc/prometheus 9090:9090
+
+kubectl port-forward -n monitoring svc/grafana 3000:3000
+```
+
+O directamente via NodePort (si está configurado):
+- Prometheus: `http://<node-ip>:30090`
+- Grafana: `http://<node-ip>:30000`
+
+### Métricas Disponibles
+
+Las métricas expuestas incluyen:
+
+**Métricas HTTP:**
+- `http_server_requests_seconds_count` - Contador de solicitudes HTTP
+- `http_server_requests_seconds_sum` - Tiempo total de respuesta
+- `http_server_requests_seconds_max` - Tiempo máximo de respuesta
+- Métricas por código de estado (2xx, 4xx, 5xx)
+
+**Métricas de Circuit Breaker (Resilience4j):**
+- `resilience4j_circuitbreaker_state` - Estado del circuit breaker (OPEN/CLOSED/HALF_OPEN)
+- `resilience4j_circuitbreaker_calls` - Llamadas totales
+- `resilience4j_circuitbreaker_failure_rate` - Tasa de fallos
+
+**Métricas de Retry (Resilience4j):**
+- `resilience4j_retry_calls_total` - Intentos de retry por tipo (successful/retry/error)
+- `resilience4j_retry_attempts` - Intentos realizados
+
+**Métricas de JVM:**
+- `jvm_memory_used_bytes` - Memoria usada
+- `jvm_gc_pause_seconds` - Pausas de garbage collection
+- `jvm_threads_live` - Hilos activos
+
+**Métricas de Sistema:**
+- `process_cpu_usage` - Uso de CPU
+- `system_load_average_1m` - Carga del sistema
+
+### Dashboards de Grafana
+
+**Dashboard principal:** "Ecommerce Microservices - Overview"
+
+Incluye los siguientes paneles:
+1. **HTTP Request Rate by Service** - Tasa de solicitudes por segundo por servicio
+2. **HTTP Request Latency** - Latencia de solicitudes (percentiles 50, 95, 99)
+3. **HTTP Success Rate** - Tasa de éxito (códigos 2xx)
+4. **HTTP 5xx Errors** - Errores del servidor por servicio
+5. **Circuit Breaker Status** - Estado de los circuit breakers
+6. **Retry Attempts** - Intentos de retry por servicio
+7. **Service Health Status** - Estado de salud de todos los servicios
+
+**Personalizar dashboards:**
+1. Accede a Grafana (http://localhost:3000)
+2. Ve a Dashboards > Ecommerce Microservices
+3. Edita o crea nuevos paneles usando PromQL queries
+
+### Consultas PromQL Útiles
+
+**Tasa de solicitudes por servicio:**
+```promql
+sum(rate(http_server_requests_seconds_count[5m])) by (application)
+```
+
+**Latencia p99 por servicio:**
+```promql
+histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application)) * 1000
+```
+
+**Tasa de éxito (códigos 2xx):**
+```promql
+sum(rate(http_server_requests_seconds_count{status=~"2.."}[5m])) by (application) 
+/ 
+sum(rate(http_server_requests_seconds_count[5m])) by (application)
+```
+
+**Circuit breakers abiertos:**
+```promql
+resilience4j_circuitbreaker_state{state="open"}
+```
+
+**Errores 5xx por servicio:**
+```promql
+sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application, status)
+```
+
+### Configuración de Prometheus
+
+El archivo de configuración está en `monitoring/prometheus/prometheus.yml` y define:
+
+- **Intervalo de scraping**: 15 segundos
+- **Retención de datos**: 30 días
+- **Targets**: Todos los microservicios configurados para scraping
+
+Para modificar la configuración:
+1. Edita `monitoring/prometheus/prometheus.yml`
+2. Reinicia Prometheus:
+   ```bash
+   # Docker Compose
+   docker compose -f compose.yml restart prometheus
+   
+   # Kubernetes - recarga la configuración
+   curl -X POST http://localhost:9090/-/reload
+   ```
+
+### Archivos de Configuración
+
+**Estructura de monitoreo:**
+```
+monitoring/
+├── prometheus/
+│   └── prometheus.yml          # Configuración de Prometheus
+└── grafana/
+    ├── provisioning/
+    │   ├── datasources/
+    │   │   └── prometheus.yml  # Datasource de Prometheus
+    │   └── dashboards/
+    │       └── dashboard.yml   # Configuración de dashboards
+    └── dashboards/
+        └── microservices-overview.json  # Dashboard principal
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/prometheus.yaml` - Deployment, Service y ConfigMap de Prometheus
+- `k8s/grafana.yaml` - Deployment, Service y ConfigMaps de Grafana
