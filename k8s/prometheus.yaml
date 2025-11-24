@@ -226,6 +226,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: monitoring-sa
       containers:
       - name: prometheus
         image: prom/prometheus:latest

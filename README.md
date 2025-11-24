@@ -866,6 +866,18 @@ Las exclusiones configuradas en `sonar-project.properties` ignoran carpetas de i
 - **Integración**: Plugin Maven, workflows CI/CD
 - **Reportes**: Dashboard web en SonarQube
 
+### Escaneo Continuo de Vulnerabilidades
+
+**Escaneo Programado Diario:**
+- Workflow: `.github/workflows/security-scan-scheduled.yml`
+- Ejecuta diariamente a las 2 AM UTC
+- Escanea todos los microservicios con:
+  - OWASP Dependency-Check
+  - Trivy filesystem scan
+  - Trivy Dockerfile scan
+  - Trivy container image scan
+- Reportes subidos a GitHub Security como SARIF
+
 ### Próximos Pasos
 - Agregar agregación de cobertura global.
 - Integrar análisis adicional (SpotBugs) si es necesario.
@@ -1486,6 +1498,127 @@ monitoring/
 - `k8s/prometheus.yaml` - Deployment, Service y ConfigMap de Prometheus
 - `k8s/grafana.yaml` - Deployment, Service y ConfigMaps de Grafana
 
+## Seguridad
+
+Esta sección describe las implementaciones de seguridad del proyecto: escaneo continuo de vulnerabilidades, gestión segura de secretos, RBAC y TLS.
+
+### Escaneo Continuo de Vulnerabilidades
+
+El proyecto implementa un sistema completo de escaneo continuo de vulnerabilidades:
+
+**1. OWASP Dependency-Check**
+- Escanea dependencias Maven automáticamente
+- Integrado en pipelines CI/CD
+- Ejecución diaria programada (2 AM UTC)
+- Reportes HTML, JSON y XML
+
+**2. Trivy**
+- Escaneo de filesystem, Dockerfiles e imágenes
+- Integrado en pipelines CI/CD
+- Ejecución diaria programada
+- Reportes SARIF para GitHub Security
+
+**3. Escaneo Programado Diario**
+- Workflow: `.github/workflows/security-scan-scheduled.yml`
+- Ejecuta todos los días a las 2 AM UTC
+- Escanea todos los servicios automáticamente
+- Reportes consolidados en GitHub Security
+
+**Ejecución Local:**
+```bash
+# OWASP Dependency-Check
+owasp-scan.cmd    # Windows
+./owasp-scan.sh   # Linux/macOS
+
+# Trivy
+trivy fs --severity HIGH,CRITICAL .
+trivy image <image:tag>
+```
+
+### Gestión Segura de Secretos
+
+**Kubernetes Secrets:**
+- Secrets almacenados en Kubernetes
+- Referenciados en deployments usando `secretKeyRef`
+- Ejemplos en `k8s/security/secrets.example.yaml`
+
+**Crear Secrets:**
+```bash
+kubectl create secret generic database-credentials \
+  --from-literal=username=db_user \
+  --from-literal=password=db_password \
+  --namespace=ecommerce
+```
+
+**Uso en Deployments:**
+```yaml
+env:
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: password
+```
+
+**Recomendado para Producción:**
+- **Sealed Secrets**: Secrets cifrados almacenados en Git
+- **External Secrets Operator**: Integración con AWS Secrets Manager, Vault, etc.
+
+### RBAC (Role-Based Access Control)
+
+**Configuración en:** `k8s/security/rbac.yaml`
+
+**ServiceAccounts:**
+- `microservice-sa` - Para microservicios (namespace: ecommerce)
+- `monitoring-sa` - Para Prometheus/Grafana (namespace: monitoring)
+- `logging-sa` - Para Filebeat/Elasticsearch (namespace: logging)
+
+**Roles y Permisos:**
+- Cada ServiceAccount tiene permisos mínimos necesarios
+- Roles específicos por namespace
+- ClusterRoles solo para recursos de cluster (Prometheus)
+
+**Aplicar RBAC:**
+```bash
+kubectl apply -f k8s/security/rbac.yaml
+```
+
+**Verificar permisos:**
+```bash
+kubectl auth can-i get secrets \
+  --as=system:serviceaccount:ecommerce:microservice-sa \
+  -n ecommerce
+```
+
+### TLS para Servicios Públicos
+
+**Cert-Manager con Let's Encrypt:**
+- Instalación: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml`
+- ClusterIssuers configurados: `k8s/security/cert-manager.yaml`
+- Renovación automática de certificados
+
+**Ingress con TLS:**
+- Configuración en: `k8s/security/ingress-tls.yaml`
+- Anotaciones para redirección HTTP→HTTPS
+- Certificados emitidos automáticamente por Let's Encrypt
+
+**Aplicar TLS:**
+```bash
+# 1. Instalar cert-manager
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+# 2. Aplicar ClusterIssuers
+kubectl apply -f k8s/security/cert-manager.yaml
+
+# 3. Aplicar Ingresses con TLS
+kubectl apply -f k8s/security/ingress-tls.yaml
+```
+
+**Verificar certificados:**
+```bash
+kubectl get certificates -A
+kubectl describe certificate api-gateway-tls -n ecommerce
+```
 ## Gestión de Logs con Elasticsearch
 
 Esta sección describe cómo configurar y usar Elasticsearch para la gestión centralizada de logs de todos los microservicios.
@@ -2140,6 +2273,173 @@ Todos los microservicios están configurados con health checks:
   - Period: 5 segundos
   - Timeout: 3 segundos
   - Failure Threshold: 3
+
+## Despliegue con Helm Charts
+
+Este proyecto incluye **Helm Charts** para cada servicio, permitiendo una gestión más flexible y parametrizable de los despliegues en Kubernetes.
+
+### ¿Qué es Helm?
+
+Helm es el **gestor de paquetes para Kubernetes**. Permite empaquetar aplicaciones Kubernetes como "charts" reutilizables, versionados y parametrizables.
+
+### Ventajas de usar Helm
+
+- **Parametrización**: Configuración diferente por ambiente (dev/stage/prod)
+- **Versionado**: Gestión de versiones de aplicaciones
+- **Reutilización**: Un mismo chart para múltiples ambientes
+- **Instalación simple**: Un comando instala/actualiza todo
+- **Rollbacks**: Revertir cambios fácilmente
+
+### Charts Disponibles
+
+El proyecto incluye Charts de Helm para todos los servicios:
+
+**Microservicios (7):**
+- `user-service`, `product-service`, `order-service`
+- `payment-service`, `shipping-service`, `favourite-service`
+- `proxy-client`
+
+**Infraestructura (4):**
+- `api-gateway`, `service-discovery`, `cloud-config`, `zipkin`
+
+**Monitoreo (3):**
+- `prometheus`, `grafana`, `alertmanager`
+
+**Logging (2):**
+- `elasticsearch`, `filebeat`
+
+Todos los Charts están en el directorio `helm/`.
+
+### Instalación de Helm
+
+**Windows:**
+```powershell
+# Usando Chocolatey
+choco install kubernetes-helm
+
+# O descargar desde: https://github.com/helm/helm/releases
+```
+
+**Linux/macOS:**
+```bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+### Uso Básico
+
+**Instalar un servicio:**
+```bash
+helm install user-service ./helm/user-service
+```
+
+**Instalar con valores personalizados:**
+```bash
+helm install user-service ./helm/user-service \
+  --set replicaCount=3 \
+  --set image.tag=0.2.0
+```
+
+**Actualizar un servicio:**
+```bash
+helm upgrade user-service ./helm/user-service \
+  --set replicaCount=5
+```
+
+**Ver releases instaladas:**
+```bash
+helm list
+helm list -A  # Todos los namespaces
+```
+
+**Desinstalar:**
+```bash
+helm uninstall user-service
+```
+
+**Rollback:**
+```bash
+helm rollback user-service 1  
+```
+
+### Desplegar Todo el Stack
+
+**Orden de despliegue recomendado:**
+
+```bash
+# 1. Infraestructura base
+helm install service-discovery ./helm/service-discovery
+helm install cloud-config ./helm/cloud-config
+helm install zipkin ./helm/zipkin
+
+# 2. Microservicios
+helm install user-service ./helm/user-service
+helm install product-service ./helm/product-service
+helm install order-service ./helm/order-service
+helm install payment-service ./helm/payment-service
+helm install shipping-service ./helm/shipping-service
+helm install favourite-service ./helm/favourite-service
+helm install proxy-client ./helm/proxy-client
+
+# 3. API Gateway (debe ir al final)
+helm install api-gateway ./helm/api-gateway
+
+# 4. Monitoreo
+helm install prometheus ./helm/prometheus
+helm install grafana ./helm/grafana
+helm install alertmanager ./helm/alertmanager
+
+# 5. Logging
+helm install elasticsearch ./helm/elasticsearch
+helm install filebeat ./helm/filebeat
+```
+
+### Valores Personalizables
+
+Cada Chart tiene un archivo `values.yaml` con valores por defecto. Los más comunes:
+
+- `replicaCount`: Número de réplicas
+- `image.repository`: Repositorio de la imagen
+- `image.tag`: Tag de la imagen
+- `service.type`: Tipo de servicio (ClusterIP, NodePort, LoadBalancer)
+- `service.port`: Puerto del servicio
+- `namespace`: Namespace donde se desplegará
+- `resources`: Límites de recursos (CPU, memoria)
+
+**Ejemplo: Instalar con valores personalizados:**
+```bash
+helm install user-service ./helm/user-service \
+  --set replicaCount=3 \
+  --set image.tag=0.2.0 \
+  --set service.nodePort=30700 \
+  --set resources.requests.memory=512Mi \
+  --set resources.limits.memory=1Gi
+```
+
+### Multi-Ambiente
+
+**Crear archivo de valores para producción:**
+```yaml
+# helm/user-service/values-prod.yaml
+replicaCount: 3
+image:
+  tag: "0.2.0"
+service:
+  type: LoadBalancer
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+```
+
+**Instalar con valores de producción:**
+```bash
+helm install user-service ./helm/user-service \
+  -f helm/user-service/values-prod.yaml \
+  --namespace production
+```
 
 **Ejemplo de configuración en Kubernetes:**
 ```yaml

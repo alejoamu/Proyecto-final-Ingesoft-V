@@ -1,0 +1,13 @@
+apiVersion: v2
+name: alertmanager
+description: A Helm chart for Prometheus Alertmanager
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - monitoring
+  - alertmanager
+  - alerts
+maintainers:
+  - name: Ecommerce Team
+

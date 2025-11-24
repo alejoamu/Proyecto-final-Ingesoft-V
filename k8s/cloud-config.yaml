@@ -13,6 +13,7 @@ spec:
       labels:
         app: cloud-config
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: cloud-config
           image: selimhorri/cloud-config-ecommerce-boot:0.1.0

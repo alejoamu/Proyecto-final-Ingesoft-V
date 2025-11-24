@@ -13,6 +13,7 @@ spec:
       labels:
         app: service-discovery
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: service-discovery
           image: selimhorri/service-discovery-ecommerce-boot:0.1.0

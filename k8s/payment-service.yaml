@@ -13,6 +13,7 @@ spec:
       labels:
         app: payment-service
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: payment-service
           image: selimhorri/payment-service-ecommerce-boot:0.1.0

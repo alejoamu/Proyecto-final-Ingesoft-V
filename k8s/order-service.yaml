@@ -13,6 +13,7 @@ spec:
       labels:
         app: order-service
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: order-service
           image: selimhorri/order-service-ecommerce-boot:0.1.0

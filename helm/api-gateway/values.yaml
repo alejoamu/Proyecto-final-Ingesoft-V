@@ -1,0 +1,52 @@
+replicaCount: 1
+
+image:
+  repository: selimhorri/api-gateway-ecommerce-boot
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: NodePort
+  port: 8080
+  targetPort: 8080
+  nodePort: 30080
+
+namespace: ecommerce
+
+probes:
+  liveness:
+    path: /actuator/health
+    port: 8080
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /actuator/health
+    port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources: {}
+
+env:
+  springProfilesActive: dev
+  springZipkinBaseUrl: http://zipkin:9411
+  springConfigImport: optional:configserver:http://cloud-config:9296/
+  springCloudConfigUri: http://cloud-config:9296
+  springCloudConfigEnabled: "false"
+  springCloudConfigAllowOverride: "true"
+  springCloudConfigOverrideSystemProperties: "true"
+  springCloudConfigOverrideNone: "false"
+  springCloudGatewayDiscoveryLocatorEnabled: "false"
+  springCloudGatewayDiscoveryLocatorLowerCaseServiceId: "true"
+  springApplicationJson: '{"eureka":{"client":{"serviceUrl":{"defaultZone":"http://service-discovery:8761/eureka/"}}},"spring":{"cloud":{"gateway":{"routes":[{"id":"app-to-product","uri":"lb://PRODUCT-SERVICE","predicates":["Path=/app/**"],"filters":["StripPrefix=1","PrefixPath=/product-service"]},{"id":"product-direct","uri":"lb://PRODUCT-SERVICE","predicates":["Path=/product-service/**"]},{"id":"user-direct","uri":"lb://USER-SERVICE","predicates":["Path=/user-service/**"]},{"id":"order-direct","uri":"lb://ORDER-SERVICE","predicates":["Path=/order-service/**"]},{"id":"shipping-direct","uri":"lb://SHIPPING-SERVICE","predicates":["Path=/shipping-service/**"]},{"id":"payment-direct","uri":"lb://PAYMENT-SERVICE","predicates":["Path=/payment-service/**"]},{"id":"favourite-direct","uri":"lb://FAVOURITE-SERVICE","predicates":["Path=/favourite-service/**"]}]}}}}'
+  eurekaClientRegisterWithEureka: "true"
+  eurekaClientFetchRegistry: "true"
+  eurekaInstanceNonSecurePort: "8080"
+  eurekaInstancePreferIpAddress: "true"

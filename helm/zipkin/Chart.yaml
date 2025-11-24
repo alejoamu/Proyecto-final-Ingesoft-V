@@ -1,0 +1,11 @@
+apiVersion: v2
+name: zipkin
+description: A Helm chart for Zipkin
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - zipkin
+  - ecommerce
+maintainers:
+  - name: Ecommerce Team

@@ -15,6 +15,7 @@ spec:
       labels:
         app: zipkin
     spec:
+      serviceAccountName: microservice-sa
       containers:
       - name: zipkin
         image: openzipkin/zipkin:latest

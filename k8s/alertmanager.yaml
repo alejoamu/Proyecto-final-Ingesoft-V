@@ -77,6 +77,7 @@ spec:
       labels:
         app: alertmanager
     spec:
+      serviceAccountName: monitoring-sa
       containers:
       - name: alertmanager
         image: prom/alertmanager:latest

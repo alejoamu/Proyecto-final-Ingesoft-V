@@ -159,6 +159,7 @@ spec:
       labels:
         app: grafana
     spec:
+      serviceAccountName: monitoring-sa
       containers:
       - name: grafana
         image: grafana/grafana:latest

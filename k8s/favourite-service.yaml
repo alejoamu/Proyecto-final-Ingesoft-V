@@ -13,6 +13,7 @@ spec:
       labels:
         app: favourite-service
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: favourite-service
           image: selimhorri/favourite-service-ecommerce-boot:0.1.0

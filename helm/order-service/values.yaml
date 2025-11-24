@@ -1,0 +1,56 @@
+replicaCount: 1
+
+image:
+  repository: selimhorri/order-service-ecommerce-boot
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+serviceAccount:
+  create: false
+  name: microservice-sa
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: NodePort
+  port: 8300
+  targetPort: 8300
+  nodePort: 30300
+
+namespace: ecommerce
+
+env:
+  springProfilesActive: dev
+  springZipkinBaseUrl: http://zipkin:9411
+  springConfigImport: optional:configserver:http://cloud-config:9296/
+  springCloudConfigUri: http://cloud-config:9296
+  springCloudConfigEnabled: "false"
+  springCloudConfigAllowOverride: "true"
+  springCloudConfigOverrideSystemProperties: "true"
+  springCloudConfigOverrideNone: "false"
+  springApplicationJson: '{"eureka":{"client":{"serviceUrl":{"defaultZone":"http://service-discovery:8761/eureka/"}}}}'
+  eurekaClientServiceUrlDefaultZone: http://service-discovery:8761/eureka/
+  eurekaClientRegisterWithEureka: "true"
+  eurekaClientFetchRegistry: "true"
+  springJpaHibernateDdlAuto: update
+  eurekaInstanceNonSecurePort: "8300"
+  eurekaInstancePreferIpAddress: "true"
+
+probes:
+  liveness:
+    path: /order-service/actuator/health
+    port: 8300
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /order-service/actuator/health
+    port: 8300
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources: {}

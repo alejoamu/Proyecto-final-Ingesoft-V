@@ -13,6 +13,7 @@ spec:
       labels:
         app: shipping-service
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: shipping-service
           image: selimhorri/shipping-service-ecommerce-boot:0.1.0

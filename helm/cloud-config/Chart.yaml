@@ -1,0 +1,11 @@
+apiVersion: v2
+name: cloud-config
+description: A Helm chart for Cloud Config
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - cloud-config
+  - ecommerce
+maintainers:
+  - name: Ecommerce Team
