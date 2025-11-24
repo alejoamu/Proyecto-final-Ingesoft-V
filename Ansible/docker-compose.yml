@@ -12,22 +12,29 @@ services:
       - sonar.jdbc.username=sonar
       - sonar.jdbc.password=sonar
       - SONAR_WEB_CONTEXT=/sonar
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+      - SONAR_JAVA_OPTS=-Xms256m -Xmx512m
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
-      nproc: 4096
+      nproc: 2048
     healthcheck:
       test: [ "CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"' || wget -qO- http://localhost:9000/sonar/api/system/status | grep -q '\"status\":\"UP\"' || wget -qO- http://localhost:9000/ | grep -q \"serverStatus = 'UP'\"" ]
-      interval: 15s
-      timeout: 10s
+      interval: 30s
+      timeout: 15s
       retries: 40
-      start_period: 90s
+      start_period: 120s
     volumes:
       - sonarqube_conf:/opt/sonarqube/conf
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
     restart: unless-stopped
+    # Si tu versión de Docker/Compose lo soporta, puedes añadir límites de memoria:
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 1g
 
   db:
     image: postgres:11
