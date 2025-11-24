@@ -141,6 +141,12 @@
     swap_file_path: /swapfile
     swap_file_size_mb: 4096
   tasks:
+    - name: Eliminar repo Trivy antiguo si existe (evitar error de Release)
+      file:
+        path: /etc/apt/sources.list.d/trivy.list
+        state: absent
+      ignore_errors: true
+
     - name: Actualizar cache de paquetes
       apt:
         update_cache: yes
@@ -265,11 +271,20 @@
         dest: /home/{{ ansible_user }}/nginx.conf
         mode: '0644'
 
+    - name: Comprobar si existe carpeta de Locust en el controlador
+      delegate_to: localhost
+      become: false
+      run_once: true
+      stat:
+        path: "{{ playbook_dir | dirname }}/tests/locust"
+      register: locust_dir
+
     - name: Copiar archivos de Locust (locustfile, etc.)
       copy:
-        src: locust/
-        dest: /home/{{ ansible_user }}/locust/
+        src: "{{ playbook_dir | dirname }}/tests/locust/"
+        dest: "/home/{{ ansible_user }}/locust/"
         mode: '0755'
+      when: locust_dir.stat.exists
 
     # Asegurar que SonarQube use el contexto /sonar creando/forzando sonar.properties en el volumen de conf
     - name: Establecer sonar.web.context en el volumen sonarqube_conf
@@ -458,18 +473,37 @@
             msg: "SonarQube no alcanzó estado HEALTHY/UP dentro del tiempo esperado. Revisa los logs impresos arriba."
 
     # ===== Locust (master/worker) =====
-    - name: Levantar Locust (master y al menos 1 worker)
-      command: docker compose up -d --force-recreate locust-master locust-worker
+    - name: Levantar Locust (master y al menos 1 worker) si existe en docker-compose
+      shell: |
+        if grep -q "locust-master" docker-compose.yml; then
+          docker compose up -d --force-recreate locust-master locust-worker
+        else
+          echo "Locust no definido en docker-compose.yml, omitiendo despliegue de Locust"
+        fi
       args:
         chdir: /home/{{ ansible_user }}/
       become: true
 
-    - name: Esperar a que Locust UI esté disponible en 8089
+    - name: Esperar a que Locust UI esté disponible en 8089 (no crítico)
       wait_for:
         host: 127.0.0.1
         port: 8089
         delay: 2
         timeout: 300
+      register: locust_wait
+      ignore_errors: true
+
+    - name: Mostrar estado de contenedores de Locust si 8089 no respondió
+      when: locust_wait is failed or (locust_wait is defined and locust_wait.elapsed | default(0) >= 300)
+      shell: |
+        echo "===== docker compose ps =====" && docker compose ps && \
+        echo "===== logs locust-master =====" && docker logs --tail 50 locust-master || true && \
+        echo "===== logs locust-worker =====" && docker logs --tail 50 locust-worker || true
+      args:
+        chdir: /home/{{ ansible_user }}/
+      register: locust_debug
+      changed_when: false
+      failed_when: false
 
     - name: Levantar Nginx (compose)
       command: docker compose up -d --force-recreate nginx
@@ -478,29 +512,12 @@
       become: true
 
     # ===== Trivy CLI (opcional: instalar binario) =====
-    - name: Instalar dependencias APT para Trivy
-      apt:
-        name:
-          - wget
-          - apt-transport-https
-          - gnupg
-          - lsb-release
-        state: present
-
-    - name: Agregar repo de Trivy
+    - name: Instalar Trivy CLI desde script oficial (sin repos APT)
       shell: |
-        set -e
-        echo "deb https://aquasecurity.github.io/trivy-repo/deb stable main" | tee /etc/apt/sources.list.d/trivy.list
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
-        apt-get update -y
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          | sh -s -- -b /usr/local/bin
       args:
-        warn: false
-
-    - name: Instalar Trivy
-      apt:
-        name: trivy
-        state: present
-        update_cache: yes
+        creates: /usr/local/bin/trivy
 
     - name: Levantar Trivy (perfil tools) - opcional
       command: docker compose --profile tools up -d trivy
@@ -539,4 +556,127 @@
         port: '8089'
         proto: tcp
       when: enable_ufw | default(false)
+
+# =========================================================
+# PLAY 3: Nodo CI - K3s + microservicios (aplica manifests k3s/k8s)
+# =========================================================
+- name: CI node - Docker + K3s + microservicios
+  hosts: CI
+  become: true
+
+  vars:
+    k3s_channel: stable
+    k3s_kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+    k3s_kubeconfig_local: /home/adminuser/.kube/config
+    k3s_k8s_remote_dir: /home/adminuser/k8s-manifests
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Ensure basic packages are present
+      apt:
+        name:
+          - curl
+          - ca-certificates
+          - apt-transport-https
+          - gnupg
+          - lsb-release
+          - git
+        state: present
+
+    - name: Ensure Docker service is running (Docker CE ya instalado en PLAY 2)
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install k3s (single-node server)
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL={{ k3s_channel }} sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Ensure .kube directory exists for adminuser
+      file:
+        path: /home/adminuser/.kube
+        state: directory
+        owner: adminuser
+        group: adminuser
+        mode: "0755"
+
+    - name: Copy k3s kubeconfig for adminuser
+      copy:
+        src: "{{ k3s_kubeconfig_path }}"
+        dest: "{{ k3s_kubeconfig_local }}"
+        remote_src: yes
+        owner: adminuser
+        group: adminuser
+        mode: "0600"
+
+    - name: Install kubectl
+      get_url:
+        url: https://dl.k8s.io/release/v1.30.3/bin/linux/amd64/kubectl
+        dest: /usr/local/bin/kubectl
+        mode: "0755"
+
+    - name: Install Helm
+      shell: |
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: Create directory for k8s manifests on CI
+      file:
+        path: "{{ k3s_k8s_remote_dir }}"
+        state: directory
+        owner: adminuser
+        group: adminuser
+        mode: "0755"
+
+    - name: Copy Kubernetes manifests (microservicios) to CI
+      copy:
+        src: k3s/k8s/
+        dest: "{{ k3s_k8s_remote_dir }}/"
+        owner: adminuser
+        group: adminuser
+        mode: "0644"
+
+    - name: Apply namespace manifest
+      become_user: adminuser
+      shell: |
+        kubectl apply -f namespace.yaml --validate=false
+      args:
+        chdir: "{{ k3s_k8s_remote_dir }}"
+      register: ns_apply
+      retries: 5
+      delay: 20
+      until: ns_apply.rc == 0
+      failed_when: ns_apply.rc not in [0]
+
+    - name: Esperar a que el API de K3s responda antes de aplicar kustomize
+      become_user: adminuser
+      shell: |
+        kubectl get nodes
+      args:
+        chdir: "{{ k3s_k8s_remote_dir }}"
+      register: k3s_api_check
+      retries: 30
+      delay: 10
+      until: k3s_api_check.rc == 0
+      changed_when: false
+
+    - name: Apply remaining manifests via kustomize (con reintentos para máquina limitada)
+      become_user: adminuser
+      shell: |
+        kubectl apply -k .
+      args:
+        chdir: "{{ k3s_k8s_remote_dir }}"
+      register: kustomize_apply
+      retries: 3
+      delay: 60
+      until: kustomize_apply.rc == 0
+      failed_when: kustomize_apply.rc not in [0]
 
