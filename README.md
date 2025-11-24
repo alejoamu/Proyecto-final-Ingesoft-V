@@ -1390,3 +1390,166 @@ monitoring/
 **Manifiestos Kubernetes:**
 - `k8s/prometheus.yaml` - Deployment, Service y ConfigMap de Prometheus
 - `k8s/grafana.yaml` - Deployment, Service y ConfigMaps de Grafana
+
+## Gestión de Logs con Elasticsearch
+
+Esta sección describe cómo configurar y usar Elasticsearch para la gestión centralizada de logs de todos los microservicios.
+
+### Stack ELK: Elasticsearch + Filebeat
+
+El proyecto incluye una configuración simplificada de ELK Stack centrada en Elasticsearch:
+- **Elasticsearch**: Almacenamiento y búsqueda de logs centralizados
+- **Filebeat**: Agente ligero que recopila logs de contenedores Docker y los envía a Elasticsearch
+- **Logs estructurados**: Los microservicios generan logs en formato JSON para facilitar el análisis
+
+### Ejecutar con Docker Compose
+
+**1. Levantar Elasticsearch y Filebeat:**
+```bash
+docker network create microservices_network || true
+
+docker compose -f compose.yml up -d elasticsearch filebeat
+```
+
+**2. Verificar que Elasticsearch está funcionando:**
+```bash
+curl http://localhost:9200/_cluster/health?pretty
+
+curl http://localhost:9200/_cat/indices?v
+```
+
+**3. Acceso a Elasticsearch:**
+- **Elasticsearch API**: http://localhost:9200
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de logging:**
+```bash
+kubectl apply -f k8s/elasticsearch.yaml
+kubectl apply -f k8s/filebeat.yaml
+
+kubectl get pods -n logging
+kubectl get svc -n logging
+```
+
+**2. Acceder a Elasticsearch:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n logging svc/elasticsearch 9200:9200
+```
+
+O directamente via NodePort:
+- Elasticsearch: `http://<node-ip>:30200`
+
+**3. Verificar logs recopilados:**
+```bash
+curl http://localhost:9200/_cat/indices?v
+
+curl -X GET "http://localhost:9200/ecommerce-microservices-*/_search?pretty" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": {
+      "match": {
+        "container.name": "product-service"
+      }
+    }
+  }'
+```
+
+### Configuración de Filebeat
+
+Filebeat está configurado para:
+- **Recopilar logs**: De todos los contenedores Docker en `/var/lib/docker/containers/`
+- **Auto-descubrimiento**: Detecta automáticamente nuevos contenedores
+- **Formato JSON**: Parsea logs en formato JSON cuando están disponibles
+- **Envío a Elasticsearch**: Indexa logs en Elasticsearch con el patrón `ecommerce-microservices-YYYY.MM.DD`
+
+**Configuración en `elk/filebeat/filebeat.yml`:**
+```yaml
+output.elasticsearch:
+  hosts: ['elasticsearch:9200']
+  index: "ecommerce-microservices-%{+yyyy.MM.dd}"
+```
+
+### Estructura de Logs
+
+Los logs se indexan en Elasticsearch con la siguiente estructura:
+
+**Campos principales:**
+- `@timestamp`: Fecha y hora del log
+- `message`: Contenido del mensaje de log
+- `container.name`: Nombre del contenedor (ej: `product-service-container`)
+- `container.id`: ID del contenedor Docker
+- `json.*`: Campos parseados de logs JSON (si aplica)
+
+### Consultas Útiles en Elasticsearch
+
+**Buscar logs por servicio:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "query": {
+    "wildcard": {
+      "container.name": "*product-service*"
+    }
+  }
+}
+```
+
+**Buscar errores:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "query": {
+    "match": {
+      "message": "ERROR"
+    }
+  }
+}
+```
+
+**Buscar logs en un rango de tiempo:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "query": {
+    "range": {
+      "@timestamp": {
+        "gte": "now-1h",
+        "lte": "now"
+      }
+    }
+  }
+}
+```
+
+**Contar logs por servicio:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "size": 0,
+  "aggs": {
+    "services": {
+      "terms": {
+        "field": "container.name.keyword",
+        "size": 10
+      }
+    }
+  }
+}
+```
+
+### Archivos de Configuración
+
+**Estructura de ELK:**
+```
+elk/
+├── filebeat/
+│   └── filebeat.yml        # Configuración de Filebeat
+└── logback-spring.xml      # Configuración de logging JSON (referencia)
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/elasticsearch.yaml` - StatefulSet, Service y ConfigMap de Elasticsearch
+- `k8s/filebeat.yaml` - DaemonSet, ConfigMap, ServiceAccount y RBAC de Filebeat
