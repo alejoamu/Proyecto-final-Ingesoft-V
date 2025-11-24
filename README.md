@@ -1350,6 +1350,24 @@ Cada microservicio tiene su propio dashboard detallado con métricas relevantes:
 3. **Product Service Dashboard** (`product-service.json`)
    - Métricas de catálogo de productos
    - Requests por endpoint (GET, POST, PUT, DELETE)
+
+**Dashboard de Métricas de Negocio** (`business-metrics.json`):
+
+Dashboard dedicado a métricas relacionadas con el dominio del negocio:
+
+1. **Tasa de Órdenes Creadas** - Órdenes creadas por minuto
+2. **Valor Total de Órdenes** - Valor acumulado y total de órdenes
+3. **Valor Promedio por Orden** - Gauge con el valor promedio
+4. **Tasa de Pagos (Exitosos vs Fallidos)** - Comparación de pagos exitosos y fallidos
+5. **Tasa de Registro de Usuarios** - Nuevos usuarios registrados por minuto
+6. **Usuarios Activos** - Gauge con el número actual de usuarios activos
+7. **Tasa de Productos (Creados vs Actualizados)** - Productos creados y actualizados
+8. **Total de Productos en Catálogo** - Gauge con el total de productos disponibles
+9. **Pagos por Estado** - Distribución de pagos por estado (NOT_STARTED, IN_PROGRESS, COMPLETED)
+10. **Tasa de Éxito de Pagos** - Porcentaje de pagos exitosos
+11. **Tasa de Órdenes Eliminadas** - Órdenes eliminadas por minuto
+
+Este dashboard mide aspectos relacionados con el valor del negocio y el dominio, complementando las métricas técnicas.
    - Latencia de búsquedas y consultas
    - Circuit Breaker Status
    - Métricas de rendimiento
@@ -1448,6 +1466,56 @@ resilience4j_circuitbreaker_state{state="open"}
 sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application, status)
 ```
 
+### Métricas de Negocio
+
+Además de las métricas técnicas, el proyecto implementa **métricas de negocio** que miden aspectos relacionados con el dominio y el valor generado por la aplicación.
+
+
+**Dashboard de Métricas de Negocio:**
+
+Un dashboard dedicado (`business-metrics.json`) visualiza todas las métricas de negocio con 11 paneles diferentes.
+
+**Consultas PromQL para Métricas de Negocio:**
+
+```promql
+# Órdenes creadas por minuto
+sum(rate(business_orders_created_total[5m]))
+
+# Valor total de órdenes
+sum(business_orders_value_sum)
+
+# Valor promedio por orden
+sum(business_orders_value_sum) / sum(business_orders_value_count)
+
+# Pagos exitosos vs fallidos
+sum(rate(business_payments_successful_total[5m]))  # Exitosos
+sum(rate(business_payments_failed_total[5m]))      # Fallidos
+
+# Tasa de éxito de pagos
+sum(rate(business_payments_successful_total[5m])) 
+/ 
+(sum(rate(business_payments_successful_total[5m])) + sum(rate(business_payments_failed_total[5m])))
+
+# Usuarios registrados por minuto
+sum(rate(business_users_registered_total[5m]))
+
+# Usuarios activos actuales
+business_users_active
+
+# Productos en catálogo
+business_products_total
+```
+
+**Implementación:**
+
+Las métricas de negocio se implementan usando **Micrometer** en cada servicio. Archivos de implementación:
+- `order-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+- `payment-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+- `user-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+- `product-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+
+**Para más detalles**, consulta `Docs/BUSINESS_METRICS.md`.
+
 ### Configuración de Prometheus
 
 El archivo de configuración está en `monitoring/prometheus/prometheus.yml` y define:
@@ -1489,7 +1557,8 @@ monitoring/
     │   ├── payment-service.json         # Dashboard Payment Service
     │   ├── shipping-service.json        # Dashboard Shipping Service
     │   ├── favourite-service.json       # Dashboard Favourite Service
-    │   └── proxy-client.json            # Dashboard Proxy Client
+    │   ├── proxy-client.json            # Dashboard Proxy Client
+    │   └── business-metrics.json        # Dashboard de Métricas de Negocio
     └── scripts/
         └── create_service_dashboard.py  # Script para generar dashboards
 ```
