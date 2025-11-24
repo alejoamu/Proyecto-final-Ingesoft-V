@@ -7,7 +7,8 @@ on:
       - 'pom.xml'
       - '.github/workflows/code-quality.yml'
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'FEAT/**' ]
+  workflow_dispatch:
 
 jobs:
   build-test-sonar:
@@ -29,7 +30,14 @@ jobs:
       - name: SonarQube Scan
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: ./mvnw -B sonar:sonar -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+        run: ./mvnw -B sonar:sonar -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.login=${{ secrets.SONAR_TOKEN }} -Dsonar.projectKey=ecommerce-microservice-backend -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+
+      - name: SonarQube Quality Gate Check
+        uses: SonarSource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
   security-scan:
     runs-on: ubuntu-latest
