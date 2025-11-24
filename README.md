@@ -1554,6 +1554,322 @@ elk/
 - `k8s/elasticsearch.yaml` - StatefulSet, Service y ConfigMap de Elasticsearch
 - `k8s/filebeat.yaml` - DaemonSet, ConfigMap, ServiceAccount y RBAC de Filebeat
 
+## Tracing Distribuido con Zipkin
+
+### Stack de Tracing: Spring Cloud Sleuth + Zipkin
+
+El proyecto incluye un sistema completo de tracing distribuido implementado con:
+- **Spring Cloud Sleuth**: Instrumentación automática para rastrear solicitudes
+- **Zipkin**: Sistema de recopilación y visualización de traces
+- **Trace ID y Span ID**: Identificadores únicos propagados a través de todos los servicios
+
+### Funcionalidades Implementadas
+
+**1. Instrumentación Automática:**
+- Todos los microservicios están instrumentados con Spring Cloud Sleuth
+- Traces automáticos para:
+  - Solicitudes HTTP (Spring MVC, Spring WebFlux)
+  - Llamadas entre servicios (Feign Clients)
+  - Base de datos (JPA/Hibernate)
+  - Mensajería (Kafka - si está configurado)
+
+**2. Propagación de Traces:**
+- Trace ID único por solicitud
+- Span ID para cada operación dentro de un trace
+- Propagación automática a través de:
+  - Headers HTTP (`X-B3-TraceId`, `X-B3-SpanId`, etc.)
+  - Llamadas Feign entre servicios
+  - API Gateway a microservicios
+
+**3. Sampling Configurable:**
+- Probabilidad de sampling configurable por servicio
+- Valor por defecto: 1.0 (100% de las solicitudes se rastrean)
+- Configurable mediante variable de entorno: `SLEUTH_SAMPLER_PROBABILITY`
+
+### Ejecutar con Docker Compose
+
+**1. Levantar Zipkin:**
+```bash
+docker compose -f compose.yml up -d zipkin
+```
+
+**2. Verificar que esté corriendo:**
+```bash
+curl http://localhost:9411/health
+```
+
+**3. Generar tráfico y ver traces:**
+```bash
+
+curl http://localhost:8080/product-service/api/products
+
+```
+
+**4. Búsqueda de Traces en Zipkin UI:**
+- **Por servicio**: Selecciona un servicio específico
+- **Por tiempo**: Define rango de tiempo
+- **Por trace ID**: Si conoces el trace ID de los logs
+- **Por tag**: Busca por tags personalizados
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de Zipkin:**
+```bash
+kubectl apply -f k8s/zipkin.yaml
+
+kubectl get pods -n ecommerce | grep zipkin
+kubectl get svc -n ecommerce | grep zipkin
+```
+
+**2. Acceder a Zipkin:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n ecommerce svc/zipkin 9411:9411
+```
+
+O directamente via NodePort:
+- Zipkin: `http://<node-ip>:30411`
+
+**3. Verificar traces:**
+```bash
+
+kubectl port-forward -n ecommerce svc/api-gateway 8080:8080
+curl http://localhost:8080/product-service/api/products
+
+```
+
+### Configuración de Sampling
+
+**Ajustar sampling rate por servicio:**
+
+En `application.yml` o mediante variable de entorno:
+```yaml
+spring:
+  sleuth:
+    sampler:
+      probability: 0.5  
+```
+
+**Configurar mediante variable de entorno:**
+```bash
+
+SPRING_SLEUTH_SAMPLER_PROBABILITY=0.5
+
+
+env:
+  - name: SLEUTH_SAMPLER_PROBABILITY
+    value: "0.5"
+```
+
+**Recomendaciones de sampling:**
+- **Desarrollo**: 1.0 (100%) - Para ver todas las solicitudes
+- **Producción**: 0.1 - 0.5 (10-50%) - Balance entre visibilidad y overhead
+- **Servicios críticos**: 1.0 (100%) - Para diagnóstico completo
+
+### Visualización de Traces
+
+**1. Trace Timeline:**
+- Muestra la duración total de la solicitud
+- Visualiza todos los servicios involucrados
+- Indica el tiempo en cada servicio
+
+**2. Dependency Graph:**
+- Visualiza las dependencias entre servicios
+- Muestra la frecuencia de llamadas
+- Identifica cuellos de botella
+
+**3. Trace Details:**
+- Span individuales con:
+  - Timestamp de inicio y fin
+  - Duración exacta
+  - Tags y annotations
+  - Errores (si los hay)
+
+### Búsqueda y Filtrado
+
+**Búsqueda por:**
+- **Service Name**: Nombre del servicio (ej: `api-gateway`, `product-service`)
+- **Span Name**: Operación específica (ej: `GET /api/products`)
+- **Trace ID**: ID único del trace
+- **Duration**: Duración mínima/máxima
+- **Tags**: Tags personalizados
+- **Annotations**: Anotaciones en los spans
+
+**Ejemplo de búsqueda:**
+```
+Service Name: api-gateway
+Span Name: GET /product-service/api/products
+Min Duration: 100ms
+Max Duration: 5000ms
+```
+
+### Integración con Logs
+
+Los traces se integran automáticamente con los logs:
+
+**Formato de logs con Sleuth:**
+```
+[api-gateway,1234567890123456789,9876543210987654] INFO - Processing request
+```
+
+Donde:
+- `api-gateway` - Nombre del servicio
+- `1234567890123456789` - Trace ID
+- `9876543210987654` - Span ID
+
+**Buscar en logs por Trace ID:**
+```bash
+
+trace.id:1234567890123456789
+
+
+docker logs <container> | grep 1234567890123456789
+```
+
+### Configuración Avanzada
+
+**1. Tags Personalizados:**
+```java
+@Autowired
+private Tracer tracer;
+
+public void someMethod() {
+    Span span = tracer.currentSpan();
+    span.tag("custom.tag", "value");
+    span.tag("user.id", userId);
+}
+```
+
+**2. Annotations Personalizadas:**
+```java
+span.event("custom.event");
+span.tag("annotation", "something happened");
+```
+
+**3. Span Personalizado:**
+```java
+@NewSpan("custom-operation")
+public void customOperation() {
+    
+}
+```
+
+### Métricas de Zipkin en Prometheus
+
+Zipkin expone métricas que pueden ser scrapeadas por Prometheus:
+
+**Métricas disponibles:**
+- `zipkin_reporter_spans_total` - Total de spans reportados
+- `zipkin_reporter_spans_dropped_total` - Spans que fallaron al reportar
+- `zipkin_reporter_queue_spans` - Spans en cola para reportar
+
+**Configurar scraping en Prometheus:**
+```yaml
+scrape_configs:
+  - job_name: 'zipkin'
+    static_configs:
+      - targets: ['zipkin:9411']
+        labels:
+          service: 'zipkin'
+```
+
+### Persistencia de Traces
+
+**Configuración actual (Memoria):**
+- Traces almacenados en memoria
+- Se pierden al reiniciar Zipkin
+- Adecuado para desarrollo
+
+**Configurar persistencia con Elasticsearch:**
+
+1. Modificar `compose.yml`:
+```yaml
+zipkin:
+  environment:
+    - STORAGE_TYPE=elasticsearch
+    - ES_HOSTS=http://elasticsearch:9200
+```
+
+2. O en Kubernetes:
+```yaml
+env:
+  - name: STORAGE_TYPE
+    value: "elasticsearch"
+  - name: ES_HOSTS
+    value: "http://elasticsearch:9200"
+```
+
+### Troubleshooting
+
+**No aparecen traces en Zipkin:**
+1. Verifica que Zipkin esté corriendo: `curl http://localhost:9411/health`
+2. Verifica la URL de Zipkin en los servicios: `SPRING_ZIPKIN_BASE_URL`
+3. Verifica el sampling rate: `SLEUTH_SAMPLER_PROBABILITY`
+4. Revisa los logs del servicio para errores de conexión
+
+**Traces incompletos:**
+1. Verifica que todos los servicios tengan Sleuth configurado
+2. Verifica que los headers de trace se propaguen (X-B3-*)
+3. Revisa que Feign Clients tengan Sleuth habilitado
+
+**Alto overhead de performance:**
+1. Reduce el sampling rate: `SLEUTH_SAMPLER_PROBABILITY=0.1`
+2. Considera usar async reporting (configurar RabbitMQ/Kafka)
+
+### Archivos de Configuración
+
+**Dependencias (pom.xml):**
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-sleuth</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-sleuth-zipkin</artifactId>
+</dependency>
+```
+
+**Configuración en servicios (application.yml):**
+```yaml
+spring:
+  zipkin:
+    base-url: ${SPRING_ZIPKIN_BASE_URL:http://localhost:9411/}
+    sender:
+      type: web
+  sleuth:
+    sampler:
+      probability: ${SLEUTH_SAMPLER_PROBABILITY:1.0}
+    zipkin:
+      base-url: ${SPRING_ZIPKIN_BASE_URL:http://localhost:9411/}
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/zipkin.yaml` - Deployment, Service y ConfigMap de Zipkin
+
+### Ejemplos de Uso
+
+**1. Rastrear una solicitud completa:**
+```
+1. Cliente → API Gateway (Trace ID: abc123)
+2. API Gateway → Product Service (Trace ID: abc123)
+3. Product Service → Database (Trace ID: abc123)
+4. Product Service → User Service (Trace ID: abc123)
+```
+
+Todos los pasos aparecen en el mismo trace en Zipkin.
+
+**2. Identificar cuellos de botella:**
+- Ver duración de cada span
+- Identificar servicios lentos
+- Analizar dependencias problemáticas
+
+**3. Debugging de errores:**
+- Buscar traces con errores
+- Ver stack traces completos
+- Analizar el flujo completo de la solicitud
+
 ## Alertas para Situaciones Críticas
 
 Esta sección describe cómo configurar y usar Prometheus Alertmanager para alertar sobre situaciones críticas en los microservicios.
