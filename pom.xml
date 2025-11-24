@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
 		<version>2.5.7</version>
-		<relativePath />
+		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.selimhorri</groupId>
 	<artifactId>ecommerce-microservice-backend</artifactId>
@@ -13,15 +16,18 @@
 	<name>ecommerce-microservice-backend</name>
 	<description>Ecommerce backend implemented in Spring Boot and Spring Cloud!</description>
 	<packaging>pom</packaging>
+	
 	<properties>
 		<java.version>11</java.version>
 		<spring-cloud.version>2020.0.4</spring-cloud.version>
 		<testcontainers.version>1.16.0</testcontainers.version>
-		<sonar.projectKey>ecommerce-microservice-backend</sonar.projectKey>
-		<sonar.projectName>ecommerce-microservice-backend</sonar.projectName>
-		<sonar.coverage.jacoco.xmlReportPaths>**/target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
 		<jacoco.version>0.8.8</jacoco.version>
+		<sonar.organization>alejoamu</sonar.organization>
+		<sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
+		<sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
+		<sonar.language>java</sonar.language>
 	</properties>
+	
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -78,6 +84,7 @@
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
+	
 	<dependencyManagement>
 		<dependencies>
 			<dependency>
@@ -96,6 +103,7 @@
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
+	
 	<modules>
 		<module>service-discovery</module>
 		<module>cloud-config</module>
@@ -108,6 +116,7 @@
 		<module>shipping-service</module>
 		<module>payment-service</module>
 	</modules>
+	
 	<build>
 		<plugins>
 			<plugin>
@@ -136,26 +145,29 @@
 				<version>${jacoco.version}</version>
 				<executions>
 					<execution>
-						<id>prepare-agent</id>
+						<id>jacoco-initialize</id>
 						<goals>
 							<goal>prepare-agent</goal>
 						</goals>
 					</execution>
 					<execution>
-						<id>report</id>
-						<phase>verify</phase>
+						<id>jacoco-site</id>
+						<phase>package</phase>
 						<goals>
 							<goal>report</goal>
 						</goals>
 					</execution>
+					<execution>
+						<id>report-aggregate</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report-aggregate</goal>
+						</goals>
+					</execution>
 				</executions>
-			</plugin>
-			<plugin>
-				<groupId>org.sonarsource.scanner.maven</groupId>
-				<artifactId>sonar-maven-plugin</artifactId>
-				<version>3.9.1.2184</version>
 			</plugin>
 		</plugins>
 		<finalName>${project.artifactId}-v${project.version}</finalName>
 	</build>
+	
 </project>
