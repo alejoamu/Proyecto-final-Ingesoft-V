@@ -805,11 +805,40 @@ trivy-scan.cmd
 ```
 Los reportes se generan en `security-reports/`. El script fallará por vulnerabilidades HIGH/CRITICAL (mostrará mensajes) pero continúa listando reportes.
 
+### OWASP Dependency-Check Local
+Ejecuta escaneo de vulnerabilidades en dependencias Maven (complementa Trivy):
+```
+owasp-scan.cmd    # Windows
+./owasp-scan.sh   # Linux/macOS
+```
+El escaneo analiza todas las dependencias declaradas en `pom.xml` de cada microservicio y busca vulnerabilidades conocidas en la base de datos de OWASP.
+
+**Reportes generados:**
+- HTML: `{module}/target/dependency-check-report.html` - Reporte visual detallado
+- JSON: `{module}/target/dependency-check-report.json` - Para procesamiento automatizado
+- XML: `{module}/target/dependency-check-report.xml` - Para integración con otras herramientas
+
+Los reportes también se copian a `security-reports/owasp/` para consulta centralizada.
+
+**Configuración:**
+- Umbral CVSS: El build falla si se encuentran vulnerabilidades con CVSS >= 7.0 (configurable en `pom.xml`)
+- Actualización automática: La base de datos de vulnerabilidades se actualiza automáticamente
+- Supresiones: Archivo `owasp-suppressions.xml` para suprimir falsos positivos o vulnerabilidades conocidas
+
 ### Pipeline CI
 El workflow `code-quality.yml` ejecuta automáticamente:
 - Build + tests + cobertura
 - Análisis Sonar (requiere secretos `SONAR_HOST_URL` y `SONAR_TOKEN` en GitHub)
+- **OWASP Dependency-Check** para escaneo de dependencias Maven
 - Escaneo Trivy filesystem e imágenes (falla en severidades HIGH/CRITICAL)
+
+Los reportes de OWASP se publican como artefactos en GitHub Actions y están disponibles en la pestaña "Actions" de cada ejecución.
+
+### Reportes de Seguridad en GitHub Pages
+El workflow `ci-all-pages.yml` ejecuta OWASP Dependency-Check y publica los reportes en GitHub Pages:
+- **Ubicación**: `https://{usuario}.github.io/{repo}/security/`
+- **Estructura**: Reportes HTML organizados por microservicio
+- **Actualización**: Se actualiza automáticamente en cada push a `main`, `master` o `dev`
 
 ### Ajustes y Exclusiones
 Las exclusiones configuradas en `sonar-project.properties` ignoran carpetas de infraestructura (`k8s`, `infra`, `Ansible`, artefactos `target`, pruebas de rendimiento, e2e, archivos binarios y diagramas). Ajusta estas listas según evolucionen los módulos de pruebas.
@@ -819,9 +848,27 @@ Las exclusiones configuradas en `sonar-project.properties` ignoran carpetas de i
 - 0 vulnerabilidades HIGH/CRITICAL aceptadas en escaneos Trivy.
 - Sin code smells críticos nuevos en ramas principales.
 
+### Herramientas de Seguridad Implementadas
+
+#### OWASP Dependency-Check 
+- **Propósito**: Escanea dependencias Maven en busca de vulnerabilidades conocidas (CVE)
+- **Integración**: Plugin Maven en `pom.xml`, scripts locales, workflows CI/CD
+- **Reportes**: HTML, JSON, XML generados automáticamente
+- **Ejecución automática**: En pipelines de CI/CD y disponible localmente
+
+#### Trivy 
+- **Propósito**: Escanea filesystem, imágenes Docker y Dockerfiles
+- **Integración**: Scripts locales, workflows CI/CD
+- **Reportes**: Tablas en consola, SARIF para GitHub Security
+
+#### SonarQube 
+- **Propósito**: Análisis estático de código, calidad y seguridad
+- **Integración**: Plugin Maven, workflows CI/CD
+- **Reportes**: Dashboard web en SonarQube
+
 ### Próximos Pasos
 - Agregar agregación de cobertura global.
-- Integrar análisis adicional (SpotBugs, OWASP Dependency-Check).
+- Integrar análisis adicional (SpotBugs) si es necesario.
 - Endurecer Quality Gate (duplications, mantenibilidad) tras estabilizar cobertura.
 
 ## Patrones de Diseño

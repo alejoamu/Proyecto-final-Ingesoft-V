@@ -37,6 +37,19 @@ jobs:
         run: |
           ./mvnw -B -q -DskipTests=false test
 
+      - name: Run OWASP Dependency-Check
+        continue-on-error: true
+        run: |
+          echo "Running OWASP Dependency-Check for security vulnerabilities..."
+          ./mvnw -B org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=0 \
+            -DautoUpdate=true \
+            -Dformat=HTML \
+            -Dformat=JSON \
+            -Dformat=XML || echo "OWASP scan completed with vulnerabilities found"
+        env:
+          JAVA_OPTS: "-Xmx2048m"
+
       - name: Collect unit/integration reports into site
         id: collect
         shell: bash
@@ -71,12 +84,43 @@ jobs:
           done
           printf '%s\n' '</ul></body></html>' >> "$ui"
 
+          # Collect OWASP Dependency-Check reports
+          mkdir -p "$SITE_DIR/security"
+          find . -type f -path "*/target/dependency-check-report.html" | while read -r report; do
+            module=$(echo "$report" | sed -E 's#\./([^/]+)/.*#\1#')
+            mkdir -p "$SITE_DIR/security/$module"
+            cp "$report" "$SITE_DIR/security/$module/report.html" || true
+            # Copy JSON and XML if they exist
+            json_report=$(dirname "$report")/dependency-check-report.json
+            xml_report=$(dirname "$report")/dependency-check-report.xml
+            [ -f "$json_report" ] && cp "$json_report" "$SITE_DIR/security/$module/report.json" || true
+            [ -f "$xml_report" ] && cp "$xml_report" "$SITE_DIR/security/$module/report.xml" || true
+          done
+
+          # Build security index.html
+          sec_index="$SITE_DIR/security/index.html"
+          mkdir -p "$(dirname "$sec_index")"
+          printf '%s\n' \
+            '<html><head><meta charset="utf-8"><title>Security Reports (OWASP Dependency-Check)</title></head><body>' \
+            '<h1>Security Reports - OWASP Dependency-Check</h1>' \
+            '<p>Vulnerability scans of Maven dependencies across all microservices.</p>' \
+            '<ul>' > "$sec_index"
+          find "$SITE_DIR/security" -mindepth 1 -maxdepth 1 -type d -print0 | while IFS= read -r -d '' mod_dir; do
+            modname=$(basename "$mod_dir")
+            if [ -f "$mod_dir/report.html" ]; then
+              rel_path="security/$modname/report.html"
+              printf '%s\n' "  <li><a href=\"$rel_path\"><b>${modname}</b> - Security Report</a></li>" >> "$sec_index"
+            fi
+          done
+          printf '%s\n' '</ul></body></html>' >> "$sec_index"
+
           # Root index.html
           printf '%s\n' \
             '<html><head><meta charset="utf-8"><title>CI Reports</title></head><body>' \
             '<h1>Ecommerce Microservices - CI Reports</h1>' \
             '<ul>' \
             '  <li><a href="unit-integration/">Unit & Integration (Surefire)</a></li>' \
+            '  <li><a href="security/">Security Reports (OWASP Dependency-Check)</a></li>' \
             '  <li><a href="e2e/">E2E Readiness</a></li>' \
             '  <li><a href="locust/">Locust Load Test</a></li>' \
             '</ul>' \
@@ -267,6 +311,7 @@ jobs:
               '<h1>Ecommerce Microservices - CI Reports</h1>' \
               '<ul>' \
               '  <li><a href="unit-integration/">Unit & Integration (Surefire)</a></li>' \
+              '  <li><a href="security/">Security Reports (OWASP Dependency-Check)</a></li>' \
               '  <li><a href="e2e/">E2E Readiness</a></li>' \
               '  <li><a href="locust/">Locust Load Test</a></li>' \
               '</ul>' \
@@ -282,6 +327,7 @@ jobs:
             '<p>Vuelve al <a href="/">inicio</a> o navega a:</p>' \
             '<ul>' \
             '  <li><a href="/unit-integration/">Unit & Integration</a></li>' \
+            '  <li><a href="/security/">Security Reports (OWASP)</a></li>' \
             '  <li><a href="/e2e/">E2E Readiness</a></li>' \
             '  <li><a href="/locust/">Locust</a></li>' \
             '</ul>' \

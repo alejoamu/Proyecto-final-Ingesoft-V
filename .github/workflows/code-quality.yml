@@ -36,7 +36,38 @@ jobs:
     needs: build-test-sonar
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Run OWASP Dependency-Check
+        continue-on-error: true
+        run: |
+          echo "Running OWASP Dependency-Check for Maven dependencies..."
+          ./mvnw -B org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=7.0 \
+            -DautoUpdate=true \
+            -Dformat=HTML \
+            -Dformat=JSON \
+            -Dformat=XML
+        env:
+          JAVA_OPTS: "-Xmx2048m"
+
+      - name: Upload OWASP Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owasp-dependency-check-reports
+          path: |
+            **/target/dependency-check-report.html
+            **/target/dependency-check-report.json
+            **/target/dependency-check-report.xml
+          retention-days: 30
 
       - name: Install Trivy
         uses: aquasecurity/trivy-action@0.13.0

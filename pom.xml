@@ -21,6 +21,7 @@
 		<sonar.projectName>ecommerce-microservice-backend</sonar.projectName>
 		<sonar.coverage.jacoco.xmlReportPaths>**/target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
 		<jacoco.version>0.8.8</jacoco.version>
+		<owasp.dependency-check.version>9.0.9</owasp.dependency-check.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -154,6 +155,33 @@
 				<groupId>org.sonarsource.scanner.maven</groupId>
 				<artifactId>sonar-maven-plugin</artifactId>
 				<version>3.9.1.2184</version>
+			</plugin>
+			<plugin>
+				<groupId>org.owasp</groupId>
+				<artifactId>dependency-check-maven</artifactId>
+				<version>${owasp.dependency-check.version}</version>
+				<configuration>
+					<failBuildOnCVSS>7.0</failBuildOnCVSS>
+					<skipProvidedScope>false</skipProvidedScope>
+					<skipRuntimeScope>false</skipRuntimeScope>
+					<skipTestScope>false</skipTestScope>
+					<skipSystemScope>true</skipSystemScope>
+					<format>HTML</format>
+					<format>JSON</format>
+					<format>XML</format>
+					<suppressionFiles>
+						<suppressionFile>${project.basedir}/owasp-suppressions.xml</suppressionFile>
+					</suppressionFiles>
+					<autoUpdate>true</autoUpdate>
+					<dataDirectory>${project.basedir}/.dependency-check-data</dataDirectory>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 		</plugins>
 		<finalName>${project.artifactId}-v${project.version}</finalName>
