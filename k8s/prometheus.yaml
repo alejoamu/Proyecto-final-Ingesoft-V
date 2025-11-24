@@ -17,6 +17,14 @@ data:
         cluster: 'ecommerce-microservices'
         environment: 'kubernetes'
 
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['alertmanager.monitoring.svc.cluster.local:9093']
+
+    rule_files:
+      - "/etc/prometheus/alerts.yml"
+
     scrape_configs:
       # Prometheus itself
       - job_name: 'prometheus'
@@ -232,6 +240,9 @@ spec:
         volumeMounts:
         - name: prometheus-config
           mountPath: /etc/prometheus
+        - name: prometheus-alerts
+          mountPath: /etc/prometheus/alerts.yml
+          subPath: alerts.yml
         - name: prometheus-storage
           mountPath: /prometheus
         resources:
@@ -257,8 +268,117 @@ spec:
       - name: prometheus-config
         configMap:
           name: prometheus-config
+      - name: prometheus-alerts
+        configMap:
+          name: prometheus-alerts
       - name: prometheus-storage
         emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: monitoring
+data:
+  alerts.yml: |
+    groups:
+      - name: microservices_critical
+        interval: 30s
+        rules:
+          - alert: ServiceDown
+            expr: up{job=~"(api-gateway|proxy-client|user-service|product-service|order-service|payment-service|shipping-service|favourite-service|service-discovery|cloud-config)"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: availability
+            annotations:
+              summary: "Servicio {{ $labels.job }} está caído"
+              description: "El servicio {{ $labels.job }} no está respondiendo desde hace más de 1 minuto."
+
+          - alert: HighLatency
+            expr: |
+              histogram_quantile(0.99, 
+                sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application)
+              ) > 1
+            for: 5m
+            labels:
+              severity: warning
+              component: performance
+            annotations:
+              summary: "Alta latencia en {{ $labels.application }}"
+              description: "El percentil 99 de latencia en {{ $labels.application }} es {{ $value }}s (umbral: 1s)"
+
+          - alert: HighErrorRate
+            expr: |
+              (
+                sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application)
+                /
+                sum(rate(http_server_requests_seconds_count[5m])) by (application)
+              ) > 0.05
+            for: 5m
+            labels:
+              severity: critical
+              component: reliability
+            annotations:
+              summary: "Alta tasa de errores en {{ $labels.application }}"
+              description: "{{ $labels.application }} tiene {{ $value | humanizePercentage }} de errores 5xx (umbral: 5%)"
+
+          - alert: CircuitBreakerOpen
+            expr: resilience4j_circuitbreaker_state{state="open"} == 1
+            for: 2m
+            labels:
+              severity: critical
+              component: resilience
+            annotations:
+              summary: "Circuit Breaker abierto en {{ $labels.name }}"
+              description: "El circuit breaker {{ $labels.name }} está en estado OPEN desde hace más de 2 minutos."
+
+      - name: infrastructure_critical
+        interval: 30s
+        rules:
+          - alert: HighJvmMemoryUsage
+            expr: |
+              (
+                sum(jvm_memory_used_bytes{area="heap"}) by (application)
+                /
+                sum(jvm_memory_max_bytes{area="heap"}) by (application)
+              ) > 0.85
+            for: 5m
+            labels:
+              severity: warning
+              component: infrastructure
+            annotations:
+              summary: "Uso alto de memoria JVM en {{ $labels.application }}"
+              description: "{{ $labels.application }} está usando {{ $value | humanizePercentage }} de memoria heap (umbral: 85%)"
+
+          - alert: HighCpuUsage
+            expr: |
+              sum(rate(process_cpu_usage[5m])) by (application) > 0.8
+            for: 5m
+            labels:
+              severity: warning
+              component: infrastructure
+            annotations:
+              summary: "Uso alto de CPU en {{ $labels.application }}"
+              description: "{{ $labels.application }} está usando {{ $value | humanizePercentage }} de CPU (umbral: 80%)"
+
+      - name: business_critical
+        interval: 1m
+        rules:
+          - alert: LowSuccessRate
+            expr: |
+              (
+                sum(rate(http_server_requests_seconds_count{status=~"2.."}[5m])) by (application)
+                /
+                sum(rate(http_server_requests_seconds_count[5m])) by (application)
+              ) < 0.9
+            for: 5m
+            labels:
+              severity: critical
+              component: business
+            annotations:
+              summary: "Tasa de éxito baja en {{ $labels.application }}"
+              description: "{{ $labels.application }} tiene solo {{ $value | humanizePercentage }} de éxito (umbral: 90%)"
 ---
 apiVersion: v1
 kind: Service

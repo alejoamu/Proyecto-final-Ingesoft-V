@@ -1553,3 +1553,260 @@ elk/
 **Manifiestos Kubernetes:**
 - `k8s/elasticsearch.yaml` - StatefulSet, Service y ConfigMap de Elasticsearch
 - `k8s/filebeat.yaml` - DaemonSet, ConfigMap, ServiceAccount y RBAC de Filebeat
+
+## Alertas para Situaciones Críticas
+
+Esta sección describe cómo configurar y usar Prometheus Alertmanager para alertar sobre situaciones críticas en los microservicios.
+
+### Stack de Alertas: Prometheus + Alertmanager
+
+El proyecto incluye un sistema completo de alertas implementado con:
+- **Prometheus**: Evalúa reglas de alertas basadas en métricas
+- **Alertmanager**: Gestiona, agrupa y envía notificaciones de alertas
+- **Reglas de alertas**: Definidas para situaciones críticas, de infraestructura y de negocio
+
+### Reglas de Alertas Implementadas
+
+**Alertas Críticas de Microservicios:**
+
+1. **ServiceDown** (Crítica)
+   - **Condición**: Servicio no responde por más de 1 minuto
+   - **Severidad**: Critical
+   - **Acción**: Notificación inmediata
+
+2. **HighErrorRate** (Crítica)
+   - **Condición**: Más del 5% de errores 5xx en los últimos 5 minutos
+   - **Severidad**: Critical
+   - **Umbral**: 5% de tasa de error
+
+3. **HighLatency** (Advertencia)
+   - **Condición**: Latencia p99 > 1 segundo por más de 5 minutos
+   - **Severidad**: Warning
+   - **Umbral**: 1 segundo
+
+4. **CircuitBreakerOpen** (Crítica)
+   - **Condición**: Circuit breaker en estado OPEN por más de 2 minutos
+   - **Severidad**: Critical
+   - **Indica**: Servicio no disponible o con fallos constantes
+
+5. **CircuitBreakerHalfOpen** (Advertencia)
+   - **Condición**: Circuit breaker en estado HALF_OPEN por más de 5 minutos
+   - **Severidad**: Warning
+   - **Indica**: Servicio en proceso de recuperación
+
+6. **HighRetryRate** (Advertencia)
+   - **Condición**: Más del 30% de llamadas requieren retry
+   - **Severidad**: Warning
+   - **Umbral**: 30% de tasa de retry
+
+**Alertas de Infraestructura:**
+
+7. **HighJvmMemoryUsage** (Advertencia)
+   - **Condición**: Uso de memoria heap > 85% por más de 5 minutos
+   - **Severidad**: Warning
+   - **Umbral**: 85% de memoria
+
+8. **HighCpuUsage** (Advertencia)
+   - **Condición**: Uso de CPU > 80% por más de 5 minutos
+   - **Severidad**: Warning
+   - **Umbral**: 80% de CPU
+
+9. **HighGcPauseTime** (Advertencia)
+   - **Condición**: Tiempo de pausa GC > 0.1s/s por más de 5 minutos
+   - **Severidad**: Warning
+   - **Indica**: Problemas de rendimiento de JVM
+
+10. **PrometheusTargetDown** (Crítica)
+    - **Condición**: Prometheus no puede scrapear un target por más de 2 minutos
+    - **Severidad**: Critical
+    - **Indica**: Problema de monitoreo o servicio caído
+
+**Alertas de Negocio:**
+
+11. **NoHttpRequests** (Advertencia)
+    - **Condición**: Sin solicitudes HTTP en los últimos 10 minutos
+    - **Severidad**: Warning
+    - **Indica**: Posible problema de tráfico o servicio no accesible
+
+12. **LowSuccessRate** (Crítica)
+    - **Condición**: Tasa de éxito < 90% por más de 5 minutos
+    - **Severidad**: Critical
+    - **Umbral**: 90% de éxito
+
+### Ejecutar con Docker Compose
+
+**1. Levantar Alertmanager:**
+```bash
+docker compose -f compose.yml up -d alertmanager
+```
+
+**2. Verificar configuración:**
+```bash
+
+curl http://localhost:9093/api/v1/status
+
+curl http://localhost:9093/api/v1/alerts
+```
+
+**3. Acceso a Alertmanager:**
+- **Alertmanager UI**: http://localhost:9093
+  - Ver alertas activas
+  - Ver silencios (silences)
+  - Ver historial de alertas
+
+**4. Verificar reglas de alertas en Prometheus:**
+- **Prometheus Alerts**: http://localhost:9090/alerts
+  - Ver todas las reglas de alertas
+  - Ver estado de cada alerta (Pending/Firing)
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de alertas:**
+```bash
+kubectl apply -f k8s/alertmanager.yaml
+
+kubectl get pods -n monitoring
+kubectl get svc -n monitoring
+```
+
+**2. Acceder a Alertmanager:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n monitoring svc/alertmanager 9093:9093
+```
+
+O directamente via NodePort:
+- Alertmanager: `http://<node-ip>:30093`
+
+**3. Verificar alertas:**
+```bash
+kubectl port-forward -n monitoring svc/alertmanager 9093:9093
+curl http://localhost:9093/api/v1/alerts
+```
+
+### Configuración de Notificaciones
+
+Alertmanager está configurado con receptores para diferentes tipos de alertas:
+
+**Receptores configurados:**
+- `default-receiver`: Alertas generales (webhook)
+- `critical-receiver`: Alertas críticas (webhook)
+- `infrastructure-receiver`: Alertas de infraestructura (webhook)
+- `business-receiver`: Alertas de negocio (webhook)
+
+**Configurar notificaciones por Slack:**
+
+```yaml
+receivers:
+  - name: 'critical-receiver'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+        channel: '#alerts'
+        title: 'Alerta Crítica'
+        text: '{{ .CommonAnnotations.description }}'
+```
+### Health Checks y Probes en Kubernetes
+
+Todos los microservicios están configurados con health checks:
+
+**Liveness Probe:**
+- **Propósito**: Determina si el contenedor está vivo
+- **Acción**: Si falla, Kubernetes reinicia el contenedor
+- **Configuración**: 
+  - Path: `/actuator/health` (o con context-path)
+  - Initial Delay: 60 segundos
+  - Period: 10 segundos
+  - Timeout: 5 segundos
+  - Failure Threshold: 3
+
+**Readiness Probe:**
+- **Propósito**: Determina si el contenedor está listo para recibir tráfico
+- **Acción**: Si falla, Kubernetes remueve el pod del Service
+- **Configuración**:
+  - Path: `/actuator/health` (o con context-path)
+  - Initial Delay: 30 segundos
+  - Period: 5 segundos
+  - Timeout: 3 segundos
+  - Failure Threshold: 3
+
+**Ejemplo de configuración en Kubernetes:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /product-service/actuator/health
+    port: 8500
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /product-service/actuator/health
+    port: 8500
+  initialDelaySeconds: 30
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+```
+
+### Gestión de Alertas
+
+**Ver alertas activas:**
+```bash
+curl http://localhost:9093/api/v1/alerts
+
+```
+### Inhibiciones de Alertas
+
+Las inhibiciones evitan alertas duplicadas o relacionadas:
+
+**Configuradas:**
+- Si `ServiceDown` está activa, no alertar sobre `HighLatency` del mismo servicio
+- Si `ServiceDown` está activa, no alertar sobre `HighErrorRate` del mismo servicio
+
+**Lógica**: Si un servicio está caído, no tiene sentido alertar sobre latencia o errores.
+
+### Archivos de Configuración
+
+**Estructura de alertas:**
+```
+monitoring/
+├── prometheus/
+│   ├── prometheus.yml    # Configuración de Prometheus (incluye alertmanager)
+│   └── alerts.yml       # Reglas de alertas
+└── alertmanager/
+    └── alertmanager.yml # Configuración de Alertmanager y notificaciones
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/prometheus.yaml` - ConfigMap con reglas de alertas
+- `k8s/alertmanager.yaml` - Deployment, Service y ConfigMap de Alertmanager
+
+### Personalizar Reglas de Alertas
+
+Para modificar umbrales o agregar nuevas alertas:
+
+1. Edita `monitoring/prometheus/alerts.yml`
+2. Reinicia Prometheus:
+   ```bash
+   # Docker Compose
+   docker compose -f compose.yml restart prometheus
+   
+   # Kubernetes - recarga configuración
+   curl -X POST http://localhost:9090/-/reload
+   ```
+
+**Ejemplo de nueva regla:**
+```yaml
+- alert: CustomAlert
+  expr: your_promql_query > threshold
+  for: 5m
+  labels:
+    severity: warning
+    component: custom
+  annotations:
+    summary: "Resumen de la alerta"
+    description: "Descripción detallada: {{ $value }}"
+```

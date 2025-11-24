@@ -5,15 +5,15 @@ global:
     cluster: 'ecommerce-microservices'
     environment: 'development'
 
-# Alertmanager configuration (opcional, para futuras alertas)
-# alerting:
-#   alertmanagers:
-#     - static_configs:
-#         - targets: ['alertmanager:9093']
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
 
-# Load rules once and periodically evaluate them (opcional)
-# rule_files:
-#   - "alerts.yml"
+# Load rules once and periodically evaluate them
+rule_files:
+  - "alerts.yml"
 
 scrape_configs:
   # Prometheus itself
