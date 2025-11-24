@@ -140,7 +140,30 @@
     enable_swap: true
     swap_file_path: /swapfile
     swap_file_size_mb: 4096
+    full_sonar_reset: false  # poner a true si quieres borrar TODO Sonar/Postgres en cada ejecución
   tasks:
+    - name: Reset completo de SonarQube y Postgres (opcional, destruye todos los datos)
+      when: full_sonar_reset | default(false)
+      block:
+        - name: Detener y eliminar stack Sonar/Postgres + volúmenes
+          command: docker compose down -v --remove-orphans
+          args:
+            chdir: /home/{{ ansible_user }}/
+          failed_when: false
+          changed_when: true
+
+        - name: Eliminar contenedores sueltos de SonarQube y Postgres
+          shell: |
+            docker rm -f $(docker ps -aq --filter name=sonarqube) $(docker ps -aq --filter name=db) $(docker ps -aq --filter name=postgres) 2>/dev/null || true
+          args:
+            chdir: /home/{{ ansible_user }}/
+          changed_when: false
+
+        - name: Eliminar volúmenes de datos de SonarQube y Postgres
+          shell: |
+            docker volume rm -f sonarqube_conf sonarqube_data sonarqube_extensions postgresql_data 2>/dev/null || true
+          changed_when: false
+
     - name: Eliminar repo Trivy antiguo si existe (evitar error de Release)
       file:
         path: /etc/apt/sources.list.d/trivy.list
