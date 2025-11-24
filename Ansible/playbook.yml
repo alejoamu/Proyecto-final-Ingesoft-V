@@ -644,17 +644,25 @@
         group: adminuser
         mode: "0644"
 
-    - name: Apply namespace manifest
+    - name: Comprobar si el namespace ecommerce ya existe
       become_user: adminuser
       shell: |
-        kubectl apply -f namespace.yaml --validate=false
+        kubectl get namespace ecommerce >/dev/null 2>&1
       args:
         chdir: "{{ k3s_k8s_remote_dir }}"
-      register: ns_apply
-      retries: 5
-      delay: 20
-      until: ns_apply.rc == 0
-      failed_when: ns_apply.rc not in [0]
+      register: ns_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Crear namespace ecommerce si no existe
+      become_user: adminuser
+      shell: |
+        kubectl create namespace ecommerce --dry-run=client -o yaml | kubectl apply -f -
+      args:
+        chdir: "{{ k3s_k8s_remote_dir }}"
+      when: ns_exists.rc != 0
+      register: ns_create
+      failed_when: ns_create.rc not in [0]
 
     - name: Esperar a que el API de K3s responda antes de aplicar kustomize
       become_user: adminuser
