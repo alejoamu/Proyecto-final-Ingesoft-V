@@ -823,3 +823,321 @@ Las exclusiones configuradas en `sonar-project.properties` ignoran carpetas de i
 - Agregar agregación de cobertura global.
 - Integrar análisis adicional (SpotBugs, OWASP Dependency-Check).
 - Endurecer Quality Gate (duplications, mantenibilidad) tras estabilizar cobertura.
+
+## Patrones de Diseño
+
+Esta sección documenta los patrones de diseño utilizados en la arquitectura de microservicios del proyecto, incluyendo patrones arquitectónicos, de resiliencia y de configuración.
+
+### Patrones Arquitectónicos Existentes
+
+#### 1. **API Gateway Pattern**
+- **Ubicación**: `api-gateway/`
+- **Implementación**: Spring Cloud Gateway
+- **Propósito**: Actúa como punto de entrada único para todas las peticiones de cliente, centralizando el enrutamiento, autenticación y autorización.
+- **Beneficios**: 
+  - Simplifica la comunicación del cliente hacia múltiples microservicios
+  - Centraliza la autenticación/autorización
+  - Facilita el versionamiento de APIs
+  - Proporciona un punto único para aplicar políticas cross-cutting
+
+#### 2. **Service Discovery Pattern**
+- **Ubicación**: `service-discovery/`
+- **Implementación**: Netflix Eureka
+- **Propósito**: Permite que los microservicios se registren y descubran dinámicamente sin necesidad de configuración estática de URLs.
+- **Beneficios**:
+  - Desacoplamiento entre servicios (no necesitan conocer direcciones IP/puertos)
+  - Escalabilidad dinámica (servicios pueden agregarse/removerse sin reconfiguración)
+  - Tolerancia a fallos (balanceo de carga automático)
+  - Auto-registro y des-registro de servicios
+
+#### 3. **External Configuration Pattern (Configuration Server)**
+- **Ubicación**: `cloud-config/`
+- **Implementación**: Spring Cloud Config Server
+- **Propósito**: Centraliza la configuración de todos los microservicios en un servidor dedicado, permitiendo gestionar configuraciones por ambiente.
+- **Beneficios**:
+  - Gestión centralizada de configuración
+  - Diferentes configuraciones por ambiente (dev, stage, prod)
+  - Versionamiento de configuraciones
+  - Reducción de duplicación de configuración
+  - Soporte para configuración desde repositorios Git
+
+#### 4. **Proxy Pattern**
+- **Ubicación**: `proxy-client/`
+- **Implementación**: Spring Cloud OpenFeign
+- **Propósito**: Proporciona un proxy/cliente para comunicación entre microservicios, encapsulando la lógica de llamadas HTTP.
+- **Beneficios**:
+  - Abstracción de la comunicación HTTP
+  - Integración con Service Discovery
+  - Soporte para circuit breakers y retry
+  - Declaración de interfaces tipo REST
+
+#### 5. **Repository Pattern**
+- **Ubicación**: Todos los servicios (ej: `product-service/src/main/java/.../repository/`)
+- **Implementación**: Spring Data JPA
+- **Propósito**: Abstrae la lógica de acceso a datos, proporcionando una interfaz más orientada a objetos sobre la capa de persistencia.
+- **Beneficios**:
+  - Separación de responsabilidades entre lógica de negocio y acceso a datos
+  - Facilita el testing (mock de repositorios)
+  - Independencia de la implementación de base de datos
+  - Reducción de boilerplate code
+
+#### 6. **Service Layer Pattern**
+- **Ubicación**: Todos los servicios (ej: `product-service/src/main/java/.../service/`)
+- **Implementación**: Interfaces y clases de servicio con anotación `@Service`
+- **Propósito**: Encapsula la lógica de negocio, separándola de la capa de presentación y acceso a datos.
+- **Beneficios**:
+  - Separación de responsabilidades
+  - Reutilización de lógica de negocio
+  - Facilita testing unitario
+  - Permite transacciones `@Transactional`
+
+#### 7. **DTO (Data Transfer Object) Pattern**
+- **Ubicación**: Todos los servicios (ej: `product-service/src/main/java/.../dto/`)
+- **Implementación**: Clases DTO dedicadas
+- **Propósito**: Objetos que transportan datos entre procesos o capas de la aplicación sin exponer la estructura interna de las entidades.
+- **Beneficios**:
+  - Reduce el acoplamiento entre capas
+  - Optimiza transferencia de datos (solo campos necesarios)
+  - Oculta estructura interna de entidades
+  - Facilita versionamiento de APIs
+
+#### 8. **Database per Service Pattern**
+- **Ubicación**: Todos los servicios tienen su propia base de datos
+- **Implementación**: Cada microservicio tiene su esquema SQL propio
+- **Propósito**: Cada microservicio tiene su propia base de datos, garantizando independencia de datos.
+- **Beneficios**:
+  - Independencia de datos entre servicios
+  - Escalabilidad independiente por servicio
+  - Tecnologías heterogéneas de base de datos posibles
+  - Evita acoplamiento a nivel de datos
+
+#### 9. **Microservices Architecture Pattern**
+- **Implementación**: 10 microservicios independientes (api-gateway, service-discovery, cloud-config, proxy-client, user-service, product-service, favourite-service, order-service, shipping-service, payment-service)
+- **Propósito**: Arquitectura que estructura una aplicación como una colección de servicios débilmente acoplados.
+- **Beneficios**:
+  - Escalabilidad independiente por servicio
+  - Desarrollo y despliegue independiente
+  - Tecnologías heterogéneas posibles
+  - Aislamiento de fallos
+
+#### 10. **Event-Driven Architecture**
+- **Implementación**: Kafka mencionado en `compose.yml`
+- **Propósito**: Los servicios se comunican mediante eventos asíncronos.
+- **Beneficios**:
+  - Desacoplamiento temporal
+  - Escalabilidad mejorada
+  - Resiliencia mejorada
+  - Soporte para procesamiento asíncrono
+
+### Patrones de Resiliencia
+
+#### 1. **Circuit Breaker Pattern** 
+- **Ubicación**: Todos los servicios en `application.yml`
+- **Implementación**: Resilience4j Circuit Breaker
+- **Propósito**: Previene fallos en cascada al detectar problemas y "abrir el circuito" cuando un servicio falla repetidamente.
+- **Configuración actual**:
+  - `failure-rate-threshold: 50%` - Abre el circuito cuando el 50% de las llamadas fallan
+  - `sliding-window-size: 10` - Ventana de evaluación de 10 llamadas
+  - `wait-duration-in-open-state: 5s` - Espera 5 segundos antes de intentar de nuevo
+  - `minimum-number-of-calls: 5` - Requiere mínimo 5 llamadas antes de evaluar
+- **Beneficios**:
+  - Tolerancia a fallos mejorada
+  - Evita sobrecarga del sistema cuando hay servicios caídos
+  - Recuperación automática cuando el servicio se restaura
+  - Métricas expuestas vía Actuator
+
+#### 2. **Retry Pattern** (Implementado)
+- **Ubicación**: `proxy-client/`, `user-service/`, `product-service/` en `application.yml`
+- **Implementación**: Resilience4j Retry
+- **Propósito**: Reintenta automáticamente operaciones fallidas con estrategias de backoff configuradas.
+- **Configuración actual**:
+  - `max-attempts: 3` - Realiza hasta 3 intentos antes de fallar
+  - `wait-duration: 1000ms` - Espera 1 segundo entre intentos
+  - `exponential-backoff-multiplier: 2` - Aumenta exponencialmente el tiempo de espera
+  - Reintenta solo en excepciones específicas: `ConnectException`, `SocketTimeoutException`, `ResourceAccessException`
+  - Ignora excepciones de validación que no deben reintentarse
+- **Beneficios**:
+  - Manejo automático de fallos transitorios de red
+  - Mejora significativamente la tasa de éxito de operaciones
+  - Reduce la necesidad de lógica manual de reintento en el código
+  - Configurable por servicio u operación específica
+  - Backoff exponencial evita saturar servicios que se están recuperando
+- **Uso**: Se aplica automáticamente en llamadas Feign Client y puede usarse con anotación `@Retry(name = "proxyService")` en métodos de servicio.
+
+### Patrones de Configuración
+
+#### 1. **External Configuration Pattern** 
+- **Ubicación**: `cloud-config/` y uso en todos los servicios
+- **Implementación**: Spring Cloud Config Server
+- **Propósito**: Centraliza la configuración externa de todos los microservicios.
+- **Beneficios**:
+  - Configuración centralizada
+  - Gestión por ambientes
+  - Versionamiento de configuración
+  - Reducción de duplicación
+
+#### 2. **Configuration Refresh Pattern** (Implementado)
+- **Ubicación**: 
+  - `proxy-client/`, `user-service/`, `product-service/` en `application.yml`
+  - Clases de configuración con `@RefreshScope` (ej: `ClientConfig.java`)
+- **Implementación**: Spring Cloud Config Refresh con `@RefreshScope` y endpoint `/actuator/refresh`
+- **Propósito**: Permite actualizar la configuración de los servicios sin necesidad de reiniciarlos mediante el endpoint de refresh.
+- **Configuración**:
+  - Endpoint habilitado: `management.endpoint.refresh.enabled: true`
+  - Endpoint expuesto: `POST /actuator/refresh`
+  - Beans con `@RefreshScope` se recargan dinámicamente
+- **Cómo usar**:
+  1. Actualizar configuración en el servidor de configuración (Cloud Config)
+  2. Llamar al endpoint: `POST http://localhost:PORT/actuator/refresh`
+  3. Los beans marcados con `@RefreshScope` se recrean con la nueva configuración
+- **Beneficios**:
+  - Actualización de configuración sin downtime (sin reiniciar servicios)
+  - Aplicación dinámica e inmediata de cambios de configuración
+  - Mejora significativa la operabilidad del sistema
+  - Reducción de tiempo de recuperación tras cambios (de minutos a segundos)
+  - Permite ajustar parámetros de runtime sin interrumpir el servicio
+- **Ejemplo de uso**:
+  ```bash
+  # Refrescar configuración del user-service
+  curl -X POST http://localhost:8700/user-service/actuator/refresh
+  
+  # Refrescar configuración del proxy-client
+  curl -X POST http://localhost:8900/app/actuator/refresh
+  ```
+
+### Detalles de Implementación de Patrones Nuevos
+
+#### Implementación del Patrón Retry
+
+El patrón Retry se ha implementado usando Resilience4j en los servicios que realizan llamadas externas. La configuración se encuentra en los archivos `application.yml` de cada servicio.
+
+**Configuración (proxy-client):**
+```yaml
+resilience4j:
+  retry:
+    instances:
+      proxyService:
+        max-attempts: 3
+        wait-duration: 1000
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - java.net.ConnectException
+          - java.net.SocketTimeoutException
+          - org.springframework.web.client.ResourceAccessException
+          - feign.RetryableException
+        ignore-exceptions:
+          - java.lang.IllegalArgumentException
+          - javax.validation.ValidationException
+
+feign:
+  circuitbreaker:
+    enabled: true
+  resilience4j:
+    enabled: true
+```
+
+**Cómo funciona:**
+- Resilience4j Retry se aplica automáticamente a todos los Feign Clients cuando `feign.resilience4j.enabled=true`
+- Cuando una llamada falla con una excepción configurada en `retry-exceptions`, el sistema reintenta hasta `max-attempts` veces
+- Entre cada intento espera `wait-duration` milisegundos, multiplicado por `exponential-backoff-multiplier` en cada intento (backoff exponencial)
+- Las excepciones de validación (configuradas en `ignore-exceptions`) no se reintentan, ya que son errores permanentes
+- Se integra con Circuit Breaker: si el Circuit Breaker está abierto, no se intentan reintentos
+
+**Implementación:**
+- `FeignClientConfig.java`: Configuración de Feign con beans refreshables que usan propiedades del Config Server
+- Todos los `@FeignClient` interfaces automáticamente usan Resilience4j Retry
+- Configuración puede ser sobrescrita desde Config Server y refrescada dinámicamente
+
+**Servicios implementados:**
+- `proxy-client` - Retry en todos los Feign Clients (ProductClientService, UserClientService, OrderClientService, etc.)
+- `user-service` - Retry configurado
+- `product-service` - Retry configurado
+
+#### Implementación del Patrón Configuration Refresh
+
+El patrón Configuration Refresh permite actualizar configuraciones dinámicamente sin reiniciar los servicios mediante Spring Cloud Config Server.
+
+**Componentes implementados:**
+
+1. **Habilitación del Config Server:**
+```yaml
+spring:
+  cloud:
+    config:
+      enabled: true
+      fail-fast: false
+      retry:
+        initial-interval: 1000
+        max-attempts: 6
+        max-interval: 2000
+        multiplier: 1.1
+
+management:
+  endpoint:
+    refresh:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,refresh,metrics,prometheus
+```
+
+2. **Propiedades Refreshables (`RefreshableProperties.java`):**
+```java
+@Component
+@RefreshScope
+public class RefreshableProperties {
+    @Value("${app.api.timeout:10000}")
+    private int apiTimeout;
+    
+    @Value("${app.api.max-retries:3}")
+    private int maxRetries;
+}
+```
+
+3. **Beans Refreshables:**
+```java
+@Bean
+@RefreshScope
+public Request.Options requestOptions(RefreshableProperties props) {
+    return new Request.Options(/* usa props.getApiTimeout() */);
+}
+```
+
+**Proceso completo de refresh:**
+
+1. **Actualizar configuración en Config Server:**
+   - Editar archivo en el repositorio Git del Config Server (ej: `proxy-client-dev.yml`)
+   - Commit y push al repositorio
+
+2. **Llamar al endpoint de refresh:**
+   ```bash
+   curl -X POST http://localhost:8900/app/actuator/refresh
+   # Respuesta: ["app.api.timeout", "app.api.max-retries"] - lista de propiedades refrescadas
+   ```
+
+3. **Spring automáticamente:**
+   - Recarga las propiedades del Config Server
+   - Destruye y recrea todos los beans marcados con `@RefreshScope`
+   - Los nuevos valores se aplican inmediatamente sin reiniciar el servicio
+
+**Archivos de configuración del Config Server:**
+Los archivos de configuración deben estar en el repositorio Git del Config Server (configurado en `cloud-config/src/main/resources/application.yml`). 
+La estructura típica incluye archivos como `proxy-client-dev.yml`, `user-service-dev.yml`, `product-service-dev.yml` con las propiedades 
+refreshables definidas (ej: `app.api.timeout`, `app.user.max-results`, etc.).
+
+**Beneficios en producción:**
+- Ajustar timeouts sin downtime
+- Modificar límites de resultados por consulta
+- Habilitar/deshabilitar features (feature flags)
+- Actualizar parámetros de retry dinámicamente
+- Cambiar configuración de cache sin reiniciar
+
+**Servicios implementados:**
+- `proxy-client` - RefreshableProperties + FeignClientConfig refreshable
+- `user-service` - RefreshableProperties + endpoint refresh habilitado
+- `product-service` - RefreshableProperties + endpoint refresh habilitado
+
+### Documentación Detallada
+
+Para más detalles sobre los patrones, consulta el archivo `Docs/PATRONES_DISENO.md` que contiene un análisis más profundo de los patrones y recomendaciones adicionales.
