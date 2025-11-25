@@ -1,3 +1,11 @@
+## [1.0.1](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.0...v1.0.1) (2025-11-25)
+
+### Bug Fixes
+
+* Clean up duplicate and unused Jacoco config in pom.xml ([e3484d4](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/e3484d4fe88030aa145e0a297d06d5c359ab4dc2))
+* Improve error snippet handling in notifications workflow ([76b185e](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/76b185e534170bb408037d057d0a201b30dfb0f4))
+* Improve workflow log extraction and error handling ([741d573](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/741d57373b667d4a7a62d585d5079db75e081ceb))
+
 ## 1.0.0 (2025-11-25)
 
 ### Features
