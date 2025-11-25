@@ -22,6 +22,10 @@
 		<sonar.coverage.jacoco.xmlReportPaths>**/target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
 		<jacoco.version>0.8.8</jacoco.version>
 		<owasp.dependency-check.version>9.0.9</owasp.dependency-check.version>
+		<jacoco.version>0.8.8</jacoco.version>
+		<sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
+		<sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
+		<sonar.language>java</sonar.language>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -138,6 +142,8 @@
 				<executions>
 					<execution>
 						<id>prepare-agent</id>
+						<id>jacoco-initialize</id>
+
 						<goals>
 							<goal>prepare-agent</goal>
 						</goals>
@@ -145,6 +151,8 @@
 					<execution>
 						<id>report</id>
 						<phase>verify</phase>
+						<id>jacoco-site</id>
+						<phase>package</phase>
 						<goals>
 							<goal>report</goal>
 						</goals>
@@ -179,6 +187,11 @@
 					<execution>
 						<goals>
 							<goal>check</goal>
+					<execution>
+						<id>report-aggregate</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report-aggregate</goal>
 						</goals>
 					</execution>
 				</executions>
