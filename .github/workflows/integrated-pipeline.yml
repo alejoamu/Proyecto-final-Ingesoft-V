@@ -131,36 +131,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-  # ==================== JOB 3: SEMANTIC VERSIONING ====================
-  semantic-version:
-    name: Semantic Versioning
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.semver.outputs.version }}
-      tag: ${{ steps.semver.outputs.tag }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Generate Semantic Version
-        id: semver
-        uses: cycjimmy/semantic-release-action@v4
-        with:
-          semantic_version: 19
-          extra_plugins: |
-            @semantic-release/changelog
-            @semantic-release/git
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Output version
-        run: |
-          echo "Version: ${{ steps.semver.outputs.version }}"
-          echo "Tag: ${{ steps.semver.outputs.tag }}"
-
-  # ==================== JOB 4: UNIT & INTEGRATION TESTS ====================
+  # ==================== JOB 2: UNIT & INTEGRATION TESTS ====================
   unit-integration-tests:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
@@ -211,11 +182,11 @@ jobs:
             **/target/surefire-reports/**
             **/target/site/surefire-report.html
 
-  # ==================== JOB 5: BUILD DOCKER IMAGES ====================
+  # ==================== JOB 3: BUILD DOCKER IMAGES ====================
   build-docker:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [unit-integration-tests, semantic-version]
+    needs: [unit-integration-tests]
     strategy:
       fail-fast: false
       matrix:
@@ -271,7 +242,7 @@ jobs:
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ needs.semantic-version.outputs.tag }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
           format: 'sarif'
           output: 'trivy-image-${{ matrix.service }}.sarif'
           severity: 'CRITICAL,HIGH'
@@ -283,7 +254,7 @@ jobs:
         with:
           sarif_file: 'trivy-image-${{ matrix.service }}.sarif'
 
-  # ==================== JOB 6: E2E TESTS ====================
+  # ==================== JOB 4: E2E TESTS ====================
   e2e-tests:
     name: E2E Tests (K8s + Newman)
     runs-on: ubuntu-latest
@@ -309,7 +280,7 @@ jobs:
       - name: Load images into kind
         run: |
           for service in product-service user-service payment-service order-service shipping-service favourite-service api-gateway cloud-config service-discovery proxy-client; do
-            kind load docker-image ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ needs.semantic-version.outputs.tag }} --name e2e-test || true
+            kind load docker-image ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ github.sha }} --name e2e-test || true
           done
 
       - name: Apply Kubernetes manifests
@@ -347,7 +318,7 @@ jobs:
         if: always()
         run: kind delete cluster --name e2e-test || true
 
-  # ==================== JOB 7: DEPLOY TO STAGE (with approval) ====================
+  # ==================== JOB 5: DEPLOY TO STAGE (with approval) ====================
   deploy-stage:
     name: Deploy to Stage Environment
     runs-on: ubuntu-latest
@@ -369,7 +340,7 @@ jobs:
         run: |
           echo "Performing health checks..."
 
-  # ==================== JOB 8: DEPLOY TO PROD (with approval) ====================
+  # ==================== JOB 6: DEPLOY TO PROD (with approval) ====================
   deploy-prod:
     name: Deploy to Production Environment
     runs-on: ubuntu-latest
@@ -391,7 +362,7 @@ jobs:
         run: |
           echo "Performing health checks..."
 
-  # ==================== JOB 9: NOTIFICATIONS ====================
+  # ==================== JOB 7: NOTIFICATIONS ====================
   notify:
     name: Send Notifications
     runs-on: ubuntu-latest
