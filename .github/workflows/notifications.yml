@@ -18,6 +18,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      checks: read
     steps:
       - name: Set status
         id: status
@@ -30,26 +31,77 @@ jobs:
 
       - name: Descargar y extraer logs (solo si falla)
         if: steps.status.outputs.status == 'FAILED'
+        continue-on-error: true
         env:
-          LOGS_URL: ${{ github.event.workflow_run.logs_url }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          echo "Logs URL: $LOGS_URL"
-          curl -L -H "Authorization: Bearer $GITHUB_TOKEN" -o logs.zip "$LOGS_URL"
-          unzip -q logs.zip -d logs
+          echo "Descargando logs para run ID: $RUN_ID"
+          # Usar la API de GitHub Actions para descargar logs
+          HTTP_CODE=$(curl -L \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -w "%{http_code}" \
+            -o logs.zip \
+            -s \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/logs")
+          
+          echo "HTTP Status Code: $HTTP_CODE"
+          
+          # Verificar que el archivo descargado es un ZIP válido
+          if [ ! -f logs.zip ] || [ "$HTTP_CODE" != "200" ]; then
+            echo "Advertencia: No se pudo descargar logs.zip (HTTP $HTTP_CODE)"
+            if [ -f logs.zip ]; then
+              echo "Contenido de la respuesta:"
+              head -c 500 logs.zip
+              echo ""
+            fi
+            mkdir -p logs
+            echo "No se pudieron descargar los logs del workflow (HTTP $HTTP_CODE)." > logs/error.txt
+            exit 0
+          fi
+          
+          # Verificar que es un archivo ZIP válido
+          if ! file logs.zip | grep -q "Zip archive"; then
+            echo "Advertencia: El archivo descargado no es un ZIP válido. Contenido:"
+            head -c 500 logs.zip
+            echo ""
+            echo "Intentando continuar sin logs..."
+            mkdir -p logs
+            echo "No se pudieron descargar los logs del workflow (archivo no válido)." > logs/error.txt
+            exit 0
+          fi
+          
+          # Extraer logs
+          unzip -q logs.zip -d logs || {
+            echo "Error al extraer logs.zip. Intentando continuar..."
+            mkdir -p logs
+            echo "Error al extraer logs del archivo ZIP." > logs/error.txt
+          }
+          
           echo "Archivos de log extraídos:" && ls -1 logs | head -n 20
 
       - name: Generar snippet de fallos
         if: steps.status.outputs.status == 'FAILED'
         id: snippet
         run: |
+          # Asegurar que el directorio logs existe
+          mkdir -p logs distilled
+          
           # Buscar patrones comunes de error en todos los .txt
           MAX_LINES=200
-          PATTERN='ERROR|Error|FAIL|Fail|::error'
-          mkdir -p distilled
-          for f in logs/*.txt; do
-            grep -E "$PATTERN" "$f" | head -n $MAX_LINES >> distilled/failures.txt || true
-          done
-          if [ -f distilled/failures.txt ]; then
+          PATTERN='ERROR|Error|FAIL|Fail|::error|error:|Exception|Exception:'
+          
+          # Buscar errores en todos los archivos de log
+          if [ -d logs ] && [ "$(ls -A logs/*.txt 2>/dev/null)" ]; then
+            for f in logs/*.txt; do
+              if [ -f "$f" ]; then
+                grep -E "$PATTERN" "$f" | head -n $MAX_LINES >> distilled/failures.txt || true
+              fi
+            done
+          fi
+          
+          if [ -f distilled/failures.txt ] && [ -s distilled/failures.txt ]; then
             # Limitar tamaño (Slack/Teams)
             head -c 8000 distilled/failures.txt > distilled/failures_truncated.txt
             echo 'found=true' >> $GITHUB_OUTPUT
@@ -58,7 +110,7 @@ jobs:
             echo "snippet=$SNIPPET" >> $GITHUB_OUTPUT
           else
             echo 'found=false' >> $GITHUB_OUTPUT
-            echo 'snippet=No se encontraron líneas con patrones de error.' >> $GITHUB_OUTPUT
+            echo 'snippet=No se pudieron obtener los logs del workflow. Ver detalles en: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}' >> $GITHUB_OUTPUT
           fi
 
       - name: Slack notification (from secret)
@@ -71,7 +123,7 @@ jobs:
               "blocks": [
                 {
                   "type": "section",
-                  "text": {"type": "mrkdwn", "text": "*${{ github.event.workflow_run.name }}* finalizado con *${{ steps.status.outputs.status }}*\nRepositorio: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nActor: ${{ github.actor }}\nRun: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Ver ejecución>"}
+                  "text": {"type": "mrkdwn", "text": "*${{ github.event.workflow_run.name }}* finalizado con *${{ steps.status.outputs.status }}*\nRepositorio: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nActor: ${{ github.actor }}\nRun: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}|Ver ejecución>"}
                 }
               ]
             }
