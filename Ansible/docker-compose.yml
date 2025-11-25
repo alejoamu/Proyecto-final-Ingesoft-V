@@ -1,132 +1,70 @@
+version: "3.9"
 services:
+  db:
+    image: postgres:13
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonar
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
   sonarqube:
-    image: sonarqube:8.2-community
+    image: sonarqube:9.9-community
     container_name: sonarqube
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:9000/sonar/api/system/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
     ports:
       - "9000:9000"
-    environment:
-      - sonar.jdbc.url=jdbc:postgresql://db:5432/sonar
-      - sonar.jdbc.username=sonar
-      - sonar.jdbc.password=sonar
-      - SONAR_WEB_CONTEXT=/sonar
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-      nproc: 4096
-    healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"' || wget -qO- http://localhost:9000/sonar/api/system/status | grep -q '\"status\":\"UP\"' || wget -qO- http://localhost:9000/ | grep -q \"serverStatus = 'UP'\"" ]
-      interval: 15s
-      timeout: 10s
-      retries: 40
-      start_period: 90s
     volumes:
       - sonarqube_conf:/opt/sonarqube/conf
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
-    restart: unless-stopped
-
-  db:
-    image: postgres:11
-    container_name: postgres
-    environment:
-      - POSTGRES_USER=sonar
-      - POSTGRES_PASSWORD=sonar
-      - POSTGRES_DB=sonar
-      - PGDATA=/var/lib/postgresql/data/pgdata
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U sonar -d sonar -h 127.0.0.1 || exit 1" ]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-    volumes:
-      - postgresql_data:/var/lib/postgresql/data
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:latest
-    container_name: nginx
-    depends_on:
-      - sonarqube
-      - locust-master
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-
   locust-master:
-    image: locustio/locust:2.29.1
-    container_name: locust-master
-    command: ["-f", "/mnt/locust/locustfile.py", "--master", "--web-host", "0.0.0.0", "--web-port", "8089"]
+    image: locustio/locust
+    command: -f /locust/locustfile.py --master
     ports:
       - "8089:8089"
     volumes:
-      - ./locust:/mnt/locust:ro
-    environment:
-      - LOCUST_MODE=master
-    restart: unless-stopped
-
+      - ./locust:/locust
   locust-worker:
-    image: locustio/locust:2.29.1
-    container_name: locust-worker
+    image: locustio/locust
+    command: -f /locust/locustfile.py --worker --master-host locust-master
     depends_on:
       - locust-master
-    command: ["-f", "/mnt/locust/locustfile.py", "--worker", "--master-host", "locust-master"]
     volumes:
-      - ./locust:/mnt/locust:ro
-    environment:
-      - LOCUST_MODE=worker
-    deploy:
-      replicas: 1
-    restart: unless-stopped
-
-  trivy:
-    image: aquasec/trivy:0.54.1
-    container_name: trivy
-    profiles: ["tools"]
-    entrypoint: ["sleep", "infinity"]
+      - ./locust:/locust
+  nginx:
+    image: nginx:alpine
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - trivy-cache:/root/.cache/
-
-  k3s:
-    image: rancher/k3s:v1.29.5-k3s1
-    container_name: k3s
-    profiles: ["k8s"]
-    privileged: true
-    command: ["server", "--https-listen-port=6443"]
-    environment:
-      - K3S_KUBECONFIG_OUTPUT=/output/kubeconfig.yaml
-      - K3S_KUBECONFIG_MODE=644
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "6443:6443"
-      - "8080:30080"   # API Gateway
-      - "8300:30300"   # order-service
-      - "8400:30400"   # payment-service
-      - "8500:30500"   # product-service
-      - "8600:30600"   # shipping-service
-      - "8700:30700"   # user-service
-      - "8800:30800"   # favourite-service
-      - "8900:30900"   # proxy-client
-    volumes:
-      - k3s-data:/var/lib/rancher/k3s
-      - ./k3s:/output
-    restart: unless-stopped
-
+      - "80:80"
+    depends_on:
+      - sonarqube
+  trivy:
+    image: aquasec/trivy:latest
+    command: --version
+    profiles:
+      - tools
 volumes:
-  sonarqube_conf:
-    name: sonarqube_conf
-  sonarqube_data:
-    name: sonarqube_data
-  sonarqube_extensions:
-    name: sonarqube_extensions
   postgresql_data:
-    name: postgresql_data
-  trivy-cache:
-    name: trivy-cache
-  k3s-data:
-    name: k3s-data
+  sonarqube_conf:
+  sonarqube_data:
+  sonarqube_extensions:

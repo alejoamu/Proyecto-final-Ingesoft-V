@@ -19,3 +19,8 @@ variable "prefix" {
 variable "region" {
   type = string
 }
+
+variable "aks_subnet_prefixes" {
+  type    = list(string)
+  default = []
+}
