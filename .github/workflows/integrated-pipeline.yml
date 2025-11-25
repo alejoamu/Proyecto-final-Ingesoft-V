@@ -510,5 +510,3 @@ jobs:
               body: `Pipeline failed for commit ${context.sha}\n\n**Branch:** ${context.ref}\n**Author:** ${context.actor}\n**Workflow:** ${context.workflow}\n\n**Failed Jobs:**\n- Code Quality: ${{ needs.code-quality.result }}\n- Security Scan: ${{ needs.security-scan.result }}\n- Tests: ${{ needs.unit-integration-tests.result }}\n- Build: ${{ needs.build-docker.result }}\n- E2E: ${{ needs.e2e-tests.result }}\n\n[View Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
               labels: ['bug', 'ci/cd']
             })
-=======
-
