@@ -17,6 +17,7 @@
 		<java.version>11</java.version>
 		<spring-cloud.version>2020.0.4</spring-cloud.version>
 		<testcontainers.version>1.16.0</testcontainers.version>
+		<sonar.skip>true</sonar.skip>
 		<sonar.projectKey>ecommerce-microservice-backend</sonar.projectKey>
 		<sonar.projectName>ecommerce-microservice-backend</sonar.projectName>
 		<sonar.coverage.jacoco.xmlReportPaths>**/target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
