@@ -71,10 +71,13 @@ jobs:
           retention-days: 30
 
       - name: Install Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          trivy_version: 'latest'
-          install_only: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          wget -qO- https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz | tar -xz
+          sudo mv trivy /usr/local/bin/
+          trivy --version
 
       - name: Run Trivy filesystem scan
         continue-on-error: true
@@ -88,6 +91,7 @@ jobs:
           name: trivy-filesystem-report
           path: trivy-fs-report.txt
           retention-days: 30
+          if-no-files-found: ignore
 
       - name: Build images matrix
         continue-on-error: true
