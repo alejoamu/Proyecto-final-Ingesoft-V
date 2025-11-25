@@ -27,7 +27,7 @@ env:
   JAVA_VERSION: '11'
   MAVEN_OPTS: '-Xmx3072m'
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}/ecommerce
+  IMAGE_PREFIX: ${{ github.repository }}
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
   ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
 
