@@ -1,9 +1,10 @@
 name: Scheduled Security Scan
 
+# DISABLED - Solo code-quality.yml está habilitado
 on:
-  schedule:
-    # Ejecutar cada día a las 2 AM UTC
-    - cron: '0 2 * * *'
+  # schedule:
+  #   # Ejecutar cada día a las 2 AM UTC
+  #   - cron: '0 2 * * *'
   workflow_dispatch:  # Permitir ejecución manual
 
 jobs:

@@ -1,11 +1,12 @@
 
 name: Integrated CI/CD Pipeline
 
+# DISABLED - Solo code-quality.yml está habilitado
 on:
-  push:
-    branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
-  pull_request:
-    branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
+  # push:
+  #   branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
+  # pull_request:
+  #   branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
   workflow_dispatch:
     inputs:
       environment:

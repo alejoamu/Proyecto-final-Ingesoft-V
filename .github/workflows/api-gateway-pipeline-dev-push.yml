@@ -1,9 +1,11 @@
 
 name: Develop, on PUSH Java CI/CD of api-gateway-ecommerce-boot, ecommerce-microservice-backend app
 
+# DISABLED - Solo code-quality.yml está habilitado
 on:
-  push:
-    branches: [ develop ]
+  # push:
+  #   branches: [ develop ]
+  workflow_dispatch: {}
 
 jobs:
   build_push:

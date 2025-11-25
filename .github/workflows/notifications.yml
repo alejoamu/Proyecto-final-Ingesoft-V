@@ -3,7 +3,6 @@ name: Notifications
 on:
   workflow_run:
     workflows:
-      - Integrated CI/CD Pipeline
       - Code Quality & Security
     types:
       - completed

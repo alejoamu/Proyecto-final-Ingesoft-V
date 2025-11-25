@@ -1,10 +1,11 @@
 name: Dev CI (Maven + Docker build + K8s lint)
 
+# DISABLED - Solo code-quality.yml está habilitado
 on:
-  push:
-    branches: [ "dev" ]
-  pull_request:
-    branches: [ "dev" ]
+  # push:
+  #   branches: [ "dev" ]
+  # pull_request:
+  #   branches: [ "dev" ]
   workflow_dispatch:
 
 concurrency:

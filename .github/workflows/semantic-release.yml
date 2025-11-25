@@ -1,13 +1,15 @@
 name: Semantic Release
 
+# DISABLED - Solo code-quality.yml está habilitado
 on:
-  push:
-    branches:
-      - main
-      - master
-      - develop
-      - stage
-      - FEAT/Release-notes
+  # push:
+  #   branches:
+  #     - main
+  #     - master
+  #     - develop
+  #     - stage
+  #     - FEAT/Release-notes
+  workflow_dispatch: {}
 
 jobs:
   release:
