@@ -1,12 +1,11 @@
 
 name: Integrated CI/CD Pipeline
 
-# DISABLED - Solo code-quality.yml está habilitado
 on:
-  # push:
-  #   branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
-  # pull_request:
-  #   branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
+   push:
+     branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
+   pull_request:
+     branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
   workflow_dispatch:
     inputs:
       environment:
@@ -205,6 +204,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build JAR files
+        run: ./mvnw clean package -DskipTests -pl ${{ matrix.service }} -am
+
+      - name: Verify JAR file exists
+        run: |
+          JAR_FILE="${{ matrix.service }}/target/${{ matrix.service }}-v0.1.0.jar"
+          if [ ! -f "$JAR_FILE" ]; then
+            echo "Error: JAR file not found at $JAR_FILE"
+            echo "Contents of ${{ matrix.service }}/target/:"
+            ls -la "${{ matrix.service }}/target/" || echo "Target directory does not exist"
+            exit 1
+          fi
+          echo "JAR file found: $JAR_FILE"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -238,6 +258,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+          build-args: |
+            PROJECT_VERSION=0.1.0
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
