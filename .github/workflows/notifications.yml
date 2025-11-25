@@ -105,12 +105,24 @@ jobs:
             # Limitar tamaño (Slack/Teams)
             head -c 8000 distilled/failures.txt > distilled/failures_truncated.txt
             echo 'found=true' >> $GITHUB_OUTPUT
-            # Escapar comillas para JSON
-            SNIPPET=$(sed 's/"/\\"/g' distilled/failures_truncated.txt | sed 's/$/\\n/' | tr -d '\r')
-            echo "snippet=$SNIPPET" >> $GITHUB_OUTPUT
+            # Guardar snippet en archivo y codificar en base64 para evitar problemas con caracteres especiales
+            SNIPPET_B64=$(base64 -w 0 < distilled/failures_truncated.txt)
+            echo "$SNIPPET_B64" > snippet_b64.txt
+            # Usar delimitador multiline para evitar problemas con caracteres especiales
+            {
+              echo 'snippet<<SNIPPET_EOF'
+              cat snippet_b64.txt
+              echo 'SNIPPET_EOF'
+            } >> $GITHUB_OUTPUT
           else
             echo 'found=false' >> $GITHUB_OUTPUT
-            echo 'snippet=No se pudieron obtener los logs del workflow. Ver detalles en: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}' >> $GITHUB_OUTPUT
+            SNIPPET_MSG="No se pudieron obtener los logs del workflow. Ver detalles en: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}"
+            SNIPPET_B64=$(echo -n "$SNIPPET_MSG" | base64 -w 0)
+            {
+              echo 'snippet<<SNIPPET_EOF'
+              echo "$SNIPPET_B64"
+              echo 'SNIPPET_EOF'
+            } >> $GITHUB_OUTPUT
           fi
 
       - name: Slack notification (from secret)
@@ -134,5 +146,16 @@ jobs:
       - name: Enviar snippet separado a Slack si falló
         if: steps.status.outputs.status == 'FAILED' && env.SLACK_WEBHOOK_URL != ''
         run: |
-          PAYLOAD=$(jq -Rn --arg t "${{ github.event.workflow_run.name }}" --arg s "${{ steps.status.outputs.status }}" --arg repo "${{ github.repository }}" --arg branch "${{ github.ref_name }}" --arg actor "${{ github.actor }}" --arg snippet "${{ steps.snippet.outputs.snippet }}" '{text: ($t + " " + $s + " en " + $repo + "@" + $branch + " por " + $actor + "\nSnippet de errores:\n```" + $snippet + "```")}')
+          # Decodificar el snippet de base64
+          SNIPPET_DECODED=$(echo "${{ steps.snippet.outputs.snippet }}" | base64 -d)
+          # Escapar para JSON usando jq
+          SNIPPET_JSON=$(echo -n "$SNIPPET_DECODED" | jq -Rs .)
+          PAYLOAD=$(jq -Rn \
+            --arg t "${{ github.event.workflow_run.name }}" \
+            --arg s "${{ steps.status.outputs.status }}" \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg actor "${{ github.actor }}" \
+            --argjson snippet "$SNIPPET_JSON" \
+            '{text: ($t + " " + $s + " en " + $repo + "@" + $branch + " por " + $actor + "\nSnippet de errores:\n```" + $snippet + "```")}')
           curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
