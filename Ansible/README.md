@@ -50,3 +50,43 @@ El playbook ahora espera:
 # exporta las variables para el play de AKS
 env AKS_RESOURCE_GROUP="dev-rg" AKS_CLUSTER_NAME="ecdev-aks" ansible-playbook -i inventory.ini playbook.yml
 ```
+
+## Solución de problemas
+
+### Error: "no such host" o "Unable to connect to the server"
+
+Si acabas de **recrear el cluster AKS** o el DNS ha cambiado, el playbook ahora **detecta automáticamente** este error y refresca las credenciales. Sin embargo, si quieres forzar la actualización manualmente:
+
+**Opción 1: Forzar actualización automática (recomendado)**
+```bash
+# El playbook detectará el error y actualizará automáticamente
+env AKS_RESOURCE_GROUP="dev-rg" AKS_CLUSTER_NAME="ecdev-aks" ansible-playbook -i inventory.ini playbook.yml
+```
+
+**Opción 2: Forzar actualización manual antes de ejecutar**
+```bash
+# Eliminar kubeconfig antiguo
+rm ~/.kube/aks-config
+
+# O especificar una ruta diferente
+export AKS_KUBECONFIG=~/.kube/aks-config-new
+
+# Ejecutar playbook
+env AKS_RESOURCE_GROUP="dev-rg" AKS_CLUSTER_NAME="ecdev-aks" ansible-playbook -i inventory.ini playbook.yml
+```
+
+**Opción 3: Usar variable para forzar refresh**
+```bash
+# El playbook refrescará las credenciales si aks_refresh_credentials=true
+env AKS_RESOURCE_GROUP="dev-rg" AKS_CLUSTER_NAME="ecdev-aks" \
+    ansible-playbook -i inventory.ini playbook.yml -e "aks_refresh_credentials=true"
+```
+
+**Opción 4: Actualizar manualmente con Azure CLI**
+```bash
+# Obtener credenciales frescas del cluster
+az aks get-credentials -g dev-rg -n ecdev-aks --file ~/.kube/aks-config --overwrite-existing
+
+# Verificar conexión
+kubectl --kubeconfig ~/.kube/aks-config get nodes
+```

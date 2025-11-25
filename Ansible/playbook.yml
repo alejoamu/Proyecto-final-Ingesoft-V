@@ -562,22 +562,135 @@
         path: "{{ aks_kubeconfig_resolved }}"
       register: aks_kubeconfig_stat
 
-    - name: Obtener credenciales de AKS vía Azure CLI
+    - name: Verificar que el cluster AKS existe
+      become: false
+      command: az aks show -g {{ aks_rg }} -n {{ aks_name }} --query "{name:name,provisioningState:provisioningState,powerState:powerState.code}" -o json
+      register: aks_cluster_info
+      changed_when: false
+      failed_when: false
+
+    - name: Mostrar información del cluster AKS
+      debug:
+        msg: "Cluster AKS encontrado: {{ aks_cluster_info.stdout | from_json if aks_cluster_info.rc == 0 else 'No encontrado' }}"
+      when: aks_cluster_info.rc == 0
+
+    - name: Fallar si el cluster no existe
+      fail:
+        msg: |
+          El cluster AKS '{{ aks_name }}' no existe en el grupo de recursos '{{ aks_rg }}'.
+          Verifica que:
+          1. El nombre del cluster sea correcto
+          2. El grupo de recursos sea correcto
+          3. Tengas permisos para acceder al cluster
+          4. Estés autenticado en Azure CLI (ejecuta 'az login')
+      when: aks_cluster_info.rc != 0
+
+    - name: Verificar estado del cluster
+      fail:
+        msg: |
+          El cluster AKS '{{ aks_name }}' no está en un estado válido.
+          Estado: {{ aks_cluster_info.stdout | from_json | default({}) }}
+          Verifica que el cluster esté en estado 'Succeeded' y 'Running'.
+      when: 
+        - aks_cluster_info.rc == 0
+        - (aks_cluster_info.stdout | from_json).provisioningState | default('Unknown') != 'Succeeded'
+        - (aks_cluster_info.stdout | from_json).powerState | default('Unknown') != 'Running'
+
+    - name: Obtener credenciales de AKS vía Azure CLI (primera vez o si se solicita refresh)
       become: false
       command: az aks get-credentials -g {{ aks_rg }} -n {{ aks_name }} --file {{ aks_kubeconfig_resolved }} --overwrite-existing
       changed_when: false
+      register: aks_get_credentials
       when: aks_refresh_credentials | default(false) | bool or not aks_kubeconfig_stat.stat.exists
+
+    - name: Verificar que el kubeconfig se generó correctamente
+      stat:
+        path: "{{ aks_kubeconfig_resolved }}"
+      register: kubeconfig_verify
+      failed_when: not kubeconfig_verify.stat.exists
 
     - name: Exportar KUBECONFIG para las tareas siguientes
       set_fact:
         kubectl_env:
           KUBECONFIG: "{{ aks_kubeconfig_resolved }}"
 
-    - name: Verificar conexión al cluster
-      command: kubectl get nodes
+    - name: Verificar conexión al cluster (intento inicial)
+      command: kubectl get nodes --request-timeout=30s
       register: kubectl_nodes
       changed_when: false
       environment: "{{ kubectl_env }}"
+      failed_when: false
+
+    - name: Detectar error de DNS o conexión y refrescar credenciales automáticamente
+      block:
+        - name: Verificar si el error es de DNS/conexión
+          set_fact:
+            is_dns_error: "{{ ('no such host' in (kubectl_nodes.stderr | default(''))) or 
+                              ('Unable to connect' in (kubectl_nodes.stderr | default(''))) or
+                              ('dial tcp' in (kubectl_nodes.stderr | default(''))) }}"
+
+        - name: Eliminar kubeconfig antiguo si hay error de DNS/conexión
+          become: false
+          file:
+            path: "{{ aks_kubeconfig_resolved }}"
+            state: absent
+          when: is_dns_error | default(false) | bool
+
+        - name: Obtener credenciales frescas del cluster (forzar actualización)
+          become: false
+          command: az aks get-credentials -g {{ aks_rg }} -n {{ aks_name }} --file {{ aks_kubeconfig_resolved }} --overwrite-existing
+          changed_when: true
+          register: aks_refresh_creds
+          when: is_dns_error | default(false) | bool
+
+        - name: Verificar conexión al cluster después de refrescar credenciales
+          command: kubectl get nodes --request-timeout=30s
+          register: kubectl_nodes_retry
+          changed_when: false
+          environment: "{{ kubectl_env }}"
+          retries: 3
+          delay: 5
+          until: kubectl_nodes_retry.rc == 0
+          failed_when: false
+          when: is_dns_error | default(false) | bool
+
+        - name: Actualizar resultado de conexión después del retry
+          set_fact:
+            kubectl_nodes: "{{ kubectl_nodes_retry }}"
+          when: 
+            - is_dns_error | default(false) | bool
+            - kubectl_nodes_retry is defined
+      when: 
+        - kubectl_nodes.rc != 0
+        - ("no such host" in (kubectl_nodes.stderr | default("")) or 
+           "Unable to connect" in (kubectl_nodes.stderr | default("")) or
+           "dial tcp" in (kubectl_nodes.stderr | default("")))
+
+    - name: Mostrar error de conexión si aún falla después de refrescar
+      fail:
+        msg: |
+          No se pudo conectar al cluster AKS '{{ aks_name }}' después de refrescar las credenciales.
+          
+          Error: {{ kubectl_nodes.stderr | default('Error desconocido') }}
+          
+          Posibles causas:
+          1. Problema de DNS: El nombre del cluster no se puede resolver
+          2. Problema de red: No hay conectividad al cluster
+          3. El cluster puede estar en una red privada y requiere VPN o conexión específica
+          4. El cluster puede estar aún inicializándose (espera unos minutos)
+          
+          Soluciones:
+          - Verifica tu conexión a internet
+          - Si el cluster es privado, conecta la VPN o configura el acceso
+          - Espera unos minutos si acabas de crear el cluster
+          - Verifica que el cluster esté en estado 'Running': az aks show -g {{ aks_rg }} -n {{ aks_name }} --query powerState
+          - Intenta manualmente: az aks get-credentials -g {{ aks_rg }} -n {{ aks_name }} --file {{ aks_kubeconfig_resolved }} --overwrite-existing
+      when: kubectl_nodes.rc != 0
+
+    - name: Mostrar información de los nodos
+      debug:
+        msg: "Conexión exitosa al cluster. Nodos disponibles: {{ kubectl_nodes.stdout_lines | length }}"
+      when: kubectl_nodes.rc == 0
 
     - name: Verificar si Helm está instalado
       command: helm version --short
