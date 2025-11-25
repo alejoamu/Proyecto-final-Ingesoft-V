@@ -8,6 +8,11 @@ spec:
   selector:
     matchLabels:
       app: favourite-service
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
   template:
     metadata:
       labels:
@@ -17,6 +22,13 @@ spec:
       containers:
         - name: favourite-service
           image: selimhorri/favourite-service-ecommerce-boot:0.1.0
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
           ports:
             - containerPort: 8800
           env:
