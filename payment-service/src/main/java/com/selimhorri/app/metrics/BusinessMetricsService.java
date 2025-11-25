@@ -5,7 +5,6 @@ import org.springframework.stereotype.Component;
 import com.selimhorri.app.domain.PaymentStatus;
 
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,9 +28,6 @@ public class BusinessMetricsService {
 	private Counter paymentsSuccessfulCounter;
 	private Counter paymentsFailedCounter;
 	
-	// Counter con tags para pagos por estado
-	private Counter paymentsByStatusCounter;
-	
 	/**
 	 * Inicializa las métricas al crear el bean.
 	 */
@@ -52,11 +48,6 @@ public class BusinessMetricsService {
 					.description("Número total de pagos fallidos")
 					.tag("service", "payment-service")
 					.tag("result", "failed")
-					.register(meterRegistry);
-			
-			paymentsByStatusCounter = Counter.builder("business.payments.by.status")
-					.description("Pagos por estado (NOT_STARTED, IN_PROGRESS, COMPLETED)")
-					.tag("service", "payment-service")
 					.register(meterRegistry);
 			
 			log.info("Business metrics initialized for Payment Service");
@@ -99,9 +90,10 @@ public class BusinessMetricsService {
 	 */
 	public void recordPaymentByStatus(PaymentStatus status) {
 		initializeMetrics();
-		paymentsByStatusCounter.increment(
-			io.micrometer.core.instrument.Tags.of("status", status != null ? status.name() : "UNKNOWN")
-		);
+		meterRegistry.counter("business.payments.by.status",
+				"service", "payment-service",
+				"status", status != null ? status.name() : "UNKNOWN")
+			.increment();
 		log.debug("Business metric recorded: payment with status {}", status);
 	}
 	
