@@ -1,0 +1,91 @@
+groups:
+  - name: monitoring_tools
+    interval: 30s
+    rules:
+      # Alerta: Prometheus no puede scrapear un target
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: monitoring
+        annotations:
+          summary: "Prometheus no puede scrapear {{ $labels.job }}"
+          description: "El target {{ $labels.job }} no está disponible para scraping."
+
+      # Alerta: Prometheus mismo está caído
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: monitoring
+        annotations:
+          summary: "Prometheus está caído"
+          description: "Prometheus no está respondiendo."
+
+      # Alerta: Grafana está caída
+      - alert: GrafanaDown
+        expr: up{job="grafana"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Grafana está caída"
+          description: "Grafana no está respondiendo."
+
+      # Alerta: Alertmanager está caído
+      - alert: AlertmanagerDown
+        expr: up{job="alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Alertmanager está caído"
+          description: "Alertmanager no está respondiendo."
+
+  - name: infrastructure_critical
+    interval: 30s
+    rules:
+      # Alerta: Uso alto de memoria en contenedores Docker
+      - alert: HighContainerMemoryUsage
+        expr: |
+          (
+            container_memory_usage_bytes
+            /
+            container_spec_memory_limit_bytes
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Uso alto de memoria en contenedor {{ $labels.name }}"
+          description: "El contenedor {{ $labels.name }} está usando {{ $value | humanizePercentage }} de memoria (umbral: 90%)"
+
+      # Alerta: Uso alto de CPU en contenedores
+      - alert: HighContainerCpuUsage
+        expr: |
+          rate(container_cpu_usage_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Uso alto de CPU en contenedor {{ $labels.name }}"
+          description: "El contenedor {{ $labels.name }} está usando {{ $value | humanizePercentage }} de CPU (umbral: 80%)"
+
+      # Alerta: Contenedor reiniciándose frecuentemente
+      - alert: ContainerRestarting
+        expr: |
+          rate(container_start_time_seconds[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Contenedor {{ $labels.name }} se está reiniciando frecuentemente"
+          description: "El contenedor {{ $labels.name }} se ha reiniciado {{ $value }} veces en los últimos 5 minutos"
+
