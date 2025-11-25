@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.1...v1.0.2) (2025-11-25)
+
+### Bug Fixes
+
+* Update dependency-check plugin configuration in pom.xml ([9b6a05f](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/9b6a05fb935af4c4831912afbcb0bfd630483838))
+* Update Maven goal from report-aggregate to aggregate ([0c52138](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/0c521381fd58459fcf2cd8d82ecb57ff855fc98b))
+
 ## [1.0.1](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.0...v1.0.1) (2025-11-25)
 
 ### Bug Fixes
