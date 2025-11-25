@@ -424,6 +424,43 @@
         msg: "SonarQube no llegó a estado healthy/UP dentro del playbook; revisar manualmente en http://CI_HOST:9000/sonar"
 
     # ===== Locust (master/worker) =====
+    - name: Identificar contenedores Docker que publican el puerto 8089
+      become: false
+      command: docker ps -aq --filter publish=8089
+      register: locust_conflicts
+      failed_when: false
+      changed_when: false
+
+    - name: Detener y eliminar contenedores que ocupan 8089
+      become: false
+      when: locust_conflicts.stdout | length > 0
+      loop: "{{ locust_conflicts.stdout_lines }}"
+      command: docker rm -f {{ item }}
+      changed_when: true
+
+    - name: Liberar procesos que escuchen en el puerto 8089
+      become: true
+      shell: |
+        fuser -k 8089/tcp || true
+      changed_when: false
+
+    - name: Verificar si el puerto 8089 está ocupado antes de levantar Locust
+      become: true
+      shell: ss -tulpn | grep ':8089'
+      register: locust_port_check
+      failed_when: false
+      changed_when: false
+
+    - name: Detener y eliminar contenedores Locust previos si el puerto está ocupado
+      become: false
+      when: locust_port_check.rc == 0
+      shell: |
+        docker compose stop locust-master locust-worker || true
+        docker compose rm -f locust-master locust-worker || true
+      args:
+        chdir: /home/{{ ansible_user }}/
+      changed_when: true
+
     - name: Levantar Locust (master y al menos 1 worker) si existe en docker-compose
       become: false
       shell: |
@@ -434,10 +471,11 @@
         fi
       args:
         chdir: /home/{{ ansible_user }}/
+      register: locust_up
 
     - name: Mostrar estado de contenedores de Locust si 8089 no respondió
       become: false
-      when: locust_wait is failed or (locust_wait is defined and locust_wait.elapsed | default(0) >= 300)
+      when: (locust_up is defined and locust_up.rc != 0)
       shell: |
         echo "===== docker compose ps =====" && docker compose ps && \
         echo "===== logs locust-master =====" && docker logs --tail 50 locust-master || true && \
@@ -471,138 +509,157 @@
       when: start_trivy_container | default(false)
 
 # =========================================================
-# PLAY 3: Nodo K8s - K3s + microservicios (aplica manifests k3s/k8s)
+# PLAY 3: Despliegue en AKS desde el controlador
 # =========================================================
-- name: K8s node - K3s + microservicios
-  hosts: k8s
-  become: true
+- name: Preparar despliegues en AKS
+  hosts: local
+  gather_facts: false
+  become: false
   vars:
-    k3s_channel: stable
-    k3s_kubeconfig_path: /etc/rancher/k3s/k3s.yaml
-    k3s_kubeconfig_local: /home/adminuser/.kube/config
-    k3s_k8s_remote_dir: /home/adminuser/k8s-manifests
+    ansible_become: false
+    aks_kubeconfig_path: "{{ lookup('env','AKS_KUBECONFIG') | default('~/.kube/aks-config', true) }}"
+    aks_rg: "{{ lookup('env','AKS_RESOURCE_GROUP') }}"
+    aks_name: "{{ lookup('env','AKS_CLUSTER_NAME') }}"
+    aks_namespace: ecommerce
+    manifests_root: "{{ playbook_dir }}/../k8s"
+    helm_root: "{{ playbook_dir }}/../helm"
+    helm_releases:
+      - name: api-gateway
+        chart: "{{ helm_root }}/api-gateway"
+      - name: cloud-config
+        chart: "{{ helm_root }}/cloud-config"
+      - name: favourite-service
+        chart: "{{ helm_root }}/favourite-service"
+      - name: order-service
+        chart: "{{ helm_root }}/order-service"
+      - name: payment-service
+        chart: "{{ helm_root }}/payment-service"
+      - name: product-service
+        chart: "{{ helm_root }}/product-service"
+      - name: proxy-client
+        chart: "{{ helm_root }}/proxy-client"
+      - name: service-discovery
+        chart: "{{ helm_root }}/service-discovery"
+      - name: shipping-service
+        chart: "{{ helm_root }}/shipping-service"
+      - name: user-service
+        chart: "{{ helm_root }}/user-service"
+      - name: zipkin
+        chart: "{{ helm_root }}/zipkin"
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
+    - name: Resolver ruta absoluta del kubeconfig
+      set_fact:
+        aks_kubeconfig_resolved: "{{ aks_kubeconfig_path | expanduser }}"
 
-    - name: Ensure basic packages are present
-      apt:
-        name:
-          - curl
-          - ca-certificates
-          - apt-transport-https
-          - gnupg
-          - lsb-release
-          - git
-        state: present
+    - name: Validar variables requeridas para AKS
+      fail:
+        msg: "Debes exportar AKS_RESOURCE_GROUP y AKS_CLUSTER_NAME antes de ejecutar este play."
+      when: aks_rg | length == 0 or aks_name | length == 0
 
-    - name: Ensure Docker service is running (Docker CE ya instalado en PLAY 2)
-      systemd:
-        name: docker
-        state: started
-        enabled: yes
+    - name: Verificar si ya existe el kubeconfig solicitado
+      become: false
+      stat:
+        path: "{{ aks_kubeconfig_resolved }}"
+      register: aks_kubeconfig_stat
 
-    - name: Install k3s (single-node server)
-      shell: |
-        curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL={{ k3s_channel }} sh -
+    - name: Obtener credenciales de AKS vía Azure CLI
+      become: false
+      command: az aks get-credentials -g {{ aks_rg }} -n {{ aks_name }} --file {{ aks_kubeconfig_resolved }} --overwrite-existing
+      changed_when: false
+      when: aks_refresh_credentials | default(false) | bool or not aks_kubeconfig_stat.stat.exists
+
+    - name: Exportar KUBECONFIG para las tareas siguientes
+      set_fact:
+        kubectl_env:
+          KUBECONFIG: "{{ aks_kubeconfig_resolved }}"
+
+    - name: Verificar conexión al cluster
+      command: kubectl get nodes
+      register: kubectl_nodes
+      changed_when: false
+      environment: "{{ kubectl_env }}"
+
+    - name: Verificar si Helm está instalado
+      command: helm version --short
+      register: helm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Instalar Helm 3 si no está disponible
+      become: true
+      shell: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
       args:
-        creates: /usr/local/bin/k3s
-
-    - name: Ensure .kube directory exists for adminuser
-      file:
-        path: /home/adminuser/.kube
-        state: directory
-        owner: adminuser
-        group: adminuser
-        mode: "0755"
-
-    - name: Copy k3s kubeconfig for adminuser
-      copy:
-        src: "{{ k3s_kubeconfig_path }}"
-        dest: "{{ k3s_kubeconfig_local }}"
-        remote_src: yes
-        owner: adminuser
-        group: adminuser
-        mode: "0600"
-
-    - name: Install kubectl
-      get_url:
-        url: https://dl.k8s.io/release/v1.30.3/bin/linux/amd64/kubectl
-        dest: /usr/local/bin/kubectl
-        mode: "0755"
-
-    - name: Install Helm
-      shell: |
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      args:
+        executable: /bin/bash
         creates: /usr/local/bin/helm
+      when: helm_check.rc != 0
 
-    - name: Create directory for k8s manifests on CI
-      file:
-        path: "{{ k3s_k8s_remote_dir }}"
-        state: directory
-        owner: adminuser
-        group: adminuser
-        mode: "0755"
+    - name: Asegurar namespace {{ aks_namespace }}
+      command: kubectl create namespace {{ aks_namespace }} --dry-run=client -o yaml
+      register: namespace_manifest
+      changed_when: false
+      environment: "{{ kubectl_env }}"
 
-    - name: Copy Kubernetes manifests (microservicios) to CI
-      copy:
-        src: k3s/k8s/
-        dest: "{{ k3s_k8s_remote_dir }}/"
-        owner: adminuser
-        group: adminuser
-        mode: "0644"
-
-    - name: Comprobar si el namespace ecommerce ya existe
-      become_user: adminuser
-      shell: |
-        set -e
-        if kubectl get namespace ecommerce >/dev/null 2>&1; then
-          echo "EXISTS"
-        else
-          echo "MISSING"
-        fi
+    - name: Aplicar namespace si no existe
+      command: kubectl apply -f -
       args:
-        chdir: "{{ k3s_k8s_remote_dir }}"
-      register: ns_exists
+        stdin: "{{ namespace_manifest.stdout }}"
+      when: namespace_manifest.stdout|length > 0
+      environment: "{{ kubectl_env }}"
+
+    - name: Aplicar manifests base desde {{ manifests_root }}
+      command: kubectl apply -k "{{ manifests_root }}"
+      changed_when: false
+      environment: "{{ kubectl_env }}"
+
+    - name: Detectar services legacy previos a despliegues Helm
+      command: kubectl get service {{ item.name }} -n {{ aks_namespace }} -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}'
+      register: helm_service_owner
       failed_when: false
       changed_when: false
+      loop: "{{ helm_releases }}"
+      loop_control:
+        label: "{{ item.name }}"
+      environment: "{{ kubectl_env }}"
 
-    - name: Crear namespace ecommerce si está ausente
-      become_user: adminuser
-      shell: |
-        kubectl create namespace ecommerce --validate=false || true
-      args:
-        chdir: "{{ k3s_k8s_remote_dir }}"
+    - name: Eliminar services no gestionados por Helm
+      command: kubectl delete service {{ item.item.name }} -n {{ aks_namespace }}
+      loop: "{{ helm_service_owner.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
       when:
-        - ns_exists.stdout is defined
-        - ns_exists.stdout is search('MISSING')
-      register: ns_create
+        - item.rc == 0
+        - item.stdout.strip() != 'Helm'
+      environment: "{{ kubectl_env }}"
+
+    - name: Detectar deployments legacy previos a despliegues Helm
+      command: kubectl get deployment {{ item.name }} -n {{ aks_namespace }} -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}'
+      register: helm_deploy_owner
       failed_when: false
-
-    - name: Esperar a que el API de K3s responda antes de aplicar kustomize
-      become_user: adminuser
-      shell: |
-        kubectl get nodes
-      args:
-        chdir: "{{ k3s_k8s_remote_dir }}"
-      register: k3s_api_check
-      retries: 30
-      delay: 10
-      until: k3s_api_check.rc == 0
       changed_when: false
+      loop: "{{ helm_releases }}"
+      loop_control:
+        label: "{{ item.name }}"
+      environment: "{{ kubectl_env }}"
 
-    - name: Apply remaining manifests via kustomize (con reintentos para máquina limitada)
-      become_user: adminuser
-      shell: |
-        kubectl apply -k .
-      args:
-        chdir: "{{ k3s_k8s_remote_dir }}"
-      register: kustomize_apply
-      retries: 3
-      delay: 60
-      until: kustomize_apply.rc == 0
-      failed_when: kustomize_apply.rc not in [0]
+    - name: Eliminar deployments no gestionados por Helm
+      command: kubectl delete deployment {{ item.item.name }} -n {{ aks_namespace }}
+      loop: "{{ helm_deploy_owner.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when:
+        - item.rc == 0
+        - item.stdout.strip() != 'Helm'
+      environment: "{{ kubectl_env }}"
 
+    - name: Desplegar charts en AKS
+      command: helm upgrade --install {{ item.name }} "{{ item.chart }}" --namespace {{ aks_namespace }} --create-namespace
+      loop: "{{ helm_releases }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+      environment: "{{ kubectl_env }}"
+
+    - name: Mostrar estado final de pods
+      command: kubectl get pods -n {{ aks_namespace }}
+      changed_when: false
+      environment: "{{ kubectl_env }}"
