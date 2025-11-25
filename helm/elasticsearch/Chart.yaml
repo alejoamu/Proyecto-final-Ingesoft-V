@@ -1,0 +1,13 @@
+apiVersion: v2
+name: elasticsearch
+description: A Helm chart for Elasticsearch logging
+type: application
+version: 0.1.0
+appVersion: "8.11.0"
+keywords:
+  - logging
+  - elasticsearch
+  - elk
+maintainers:
+  - name: Ecommerce Team
+

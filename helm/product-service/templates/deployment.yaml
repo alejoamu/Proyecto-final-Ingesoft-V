@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "product-service.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{ include "product-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{ include "product-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{ include "product-service.selectorLabels" . | nindent 8 }}
+    spec:
+      {{ if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "product-service.serviceAccountName" . }}
+      {{ else if .Values.serviceAccount.name }}
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{ end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.env.springProfilesActive | quote }}
+            - name: SPRING_ZIPKIN_BASE_URL
+              value: {{ .Values.env.springZipkinBaseUrl | quote }}
+            - name: SPRING_CONFIG_IMPORT
+              value: {{ .Values.env.springConfigImport | quote }}
+            - name: SPRING_CLOUD_CONFIG_URI
+              value: {{ .Values.env.springCloudConfigUri | quote }}
+            - name: SPRING_CLOUD_CONFIG_ENABLED
+              value: {{ .Values.env.springCloudConfigEnabled | quote }}
+            - name: SPRING_CLOUD_CONFIG_ALLOW_OVERRIDE
+              value: {{ .Values.env.springCloudConfigAllowOverride | quote }}
+            - name: SPRING_CLOUD_CONFIG_OVERRIDE_SYSTEM_PROPERTIES
+              value: {{ .Values.env.springCloudConfigOverrideSystemProperties | quote }}
+            - name: SPRING_CLOUD_CONFIG_OVERRIDE_NONE
+              value: {{ .Values.env.springCloudConfigOverrideNone | quote }}
+            - name: SPRING_APPLICATION_JSON
+              value: {{ .Values.env.springApplicationJson | quote }}
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: {{ .Values.env.eurekaClientServiceUrlDefaultZone | quote }}
+            - name: EUREKA_CLIENT_REGISTER_WITH_EUREKA
+              value: {{ .Values.env.eurekaClientRegisterWithEureka | quote }}
+            - name: EUREKA_CLIENT_FETCH_REGISTRY
+              value: {{ .Values.env.eurekaClientFetchRegistry | quote }}
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: {{ .Values.env.springJpaHibernateDdlAuto | quote }}
+            - name: EUREKA_INSTANCE_NON_SECURE_PORT
+              value: {{ .Values.env.eurekaInstanceNonSecurePort | quote }}
+            - name: EUREKA_INSTANCE_PREFER_IP_ADDRESS
+              value: {{ .Values.env.eurekaInstancePreferIpAddress | quote }}
+            - name: EUREKA_INSTANCE_IP_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: EUREKA_INSTANCE_HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          {{ if .Values.probes.liveness }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.probes.liveness.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{ end }}
+          {{ if .Values.probes.readiness }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.probes.readiness.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{ end }}
+          {{ if .Values.resources }}
+          resources:
+            {{ toYaml .Values.resources | nindent 12 }}
+          {{ end }}

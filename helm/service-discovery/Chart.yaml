@@ -1,0 +1,11 @@
+apiVersion: v2
+name: service-discovery
+description: A Helm chart for Service Discovery
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - service-discovery
+  - ecommerce
+maintainers:
+  - name: Ecommerce Team

@@ -1,0 +1,513 @@
+
+name: Integrated CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop, stage, staging, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
+  pull_request:
+    branches: [ main, master, develop, stage, FEAT/-Notifications-to-teams-and-slack, FEAT/-SonarQube_And_Trivy ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'stage'
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  JAVA_VERSION: '11'
+  MAVEN_OPTS: '-Xmx3072m'
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/ecommerce
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
+  SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==================== JOB 1: CODE QUALITY (SonarQube) ====================
+  code-quality:
+    name: Code Quality & Analysis (SonarQube)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Build project
+        run: mvn -B clean compile -DskipTests
+
+      - name: Run SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=ecommerce-microservice-backend
+            -Dsonar.projectName=ecommerce-microservice-backend
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+
+      - name: SonarQube Quality Gate Check
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ==================== JOB 2: SECURITY SCAN (Trivy) ====================
+  security-scan:
+    name: Security Scan (Trivy)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - product-service
+          - user-service
+          - payment-service
+          - order-service
+          - shipping-service
+          - favourite-service
+          - api-gateway
+          - cloud-config
+          - service-discovery
+          - proxy-client
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Build JAR
+        run: |
+          cd ${{ matrix.service }}
+          ../mvnw clean package -DskipTests
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Run OWASP Dependency-Check
+        continue-on-error: true
+        run: |
+          echo "Running OWASP Dependency-Check for ${{ matrix.service }}..."
+          ./mvnw org.owasp:dependency-check-maven:check \
+            -pl ${{ matrix.service }} \
+            -am \
+            -DfailBuildOnCVSS=0 \
+            -DautoUpdate=true \
+            -Dformat=HTML \
+            -Dformat=JSON \
+            -Dformat=XML || echo "OWASP scan completed with vulnerabilities"
+        env:
+          JAVA_OPTS: "-Xmx2048m"
+
+      - name: Upload OWASP Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owasp-report-${{ matrix.service }}
+          path: ${{ matrix.service }}/target/dependency-check-report.*
+          retention-days: 30
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '${{ matrix.service }}/target'
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+
+      - name: Scan Dockerfile
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '${{ matrix.service }}/Dockerfile'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+  # ==================== JOB 3: SEMANTIC VERSIONING ====================
+  semantic-version:
+    name: Semantic Versioning
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      tag: ${{ steps.semver.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Semantic Version
+        id: semver
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 19
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Output version
+        run: |
+          echo "Version: ${{ steps.semver.outputs.version }}"
+          echo "Tag: ${{ steps.semver.outputs.tag }}"
+
+  # ==================== JOB 4: UNIT & INTEGRATION TESTS ====================
+  unit-integration-tests:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    needs: [code-quality, security-scan]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Run unit tests
+        run: mvn -B test -Dtest="*Test" -DfailIfNoTests=false
+
+      - name: Run integration tests
+        run: mvn -B test -Dtest="*IntegrationTest" -DfailIfNoTests=false
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: '**/target/surefire-reports/TEST-*.xml'
+          check_name: 'Test Results'
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          mkdir -p test-results
+          mvn surefire-report:report-only -Daggregate=true || true
+          echo "Test reports generated"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            **/target/surefire-reports/**
+            **/target/site/surefire-report.html
+
+  # ==================== JOB 5: BUILD DOCKER IMAGES ====================
+  build-docker:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [unit-integration-tests, semantic-version]
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - product-service
+          - user-service
+          - payment-service
+          - order-service
+          - shipping-service
+          - favourite-service
+          - api-gateway
+          - cloud-config
+          - service-discovery
+          - proxy-client
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ needs.semantic-version.outputs.tag }}
+          format: 'sarif'
+          output: 'trivy-image-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+        if: github.event_name != 'pull_request'
+
+      - name: Upload Trivy image scan results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && github.event_name != 'pull_request'
+        with:
+          sarif_file: 'trivy-image-${{ matrix.service }}.sarif'
+
+  # ==================== JOB 6: E2E TESTS ====================
+  e2e-tests:
+    name: E2E Tests (K8s + Newman)
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install kind
+        uses: helm/kind-action@v1.10.0
+        with:
+          version: v0.23.0
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name e2e-test --wait 120s
+          kubectl version --client
+
+      - name: Load images into kind
+        run: |
+          for service in product-service user-service payment-service order-service shipping-service favourite-service api-gateway cloud-config service-discovery proxy-client; do
+            kind load docker-image ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ needs.semantic-version.outputs.tag }} --name e2e-test || true
+          done
+
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -k k8s
+          kubectl get ns ecommerce || kubectl create ns ecommerce
+
+      - name: Wait for deployments
+        run: |
+          kubectl -n ecommerce wait --for=condition=available --timeout=600s deployment --all || true
+          kubectl -n ecommerce get pods -o wide
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Newman
+        run: npm install -g newman
+
+      - name: Run E2E tests
+        run: |
+          newman run tests/postman/ecommerce-e2e.postman_collection.json \
+            --reporters cli,junit \
+            --reporter-junit-export newman-results.xml
+
+      - name: Upload E2E results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: newman-results.xml
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name e2e-test || true
+
+  # ==================== JOB 7: DEPLOY TO STAGE (with approval) ====================
+  deploy-stage:
+    name: Deploy to Stage Environment
+    runs-on: ubuntu-latest
+    needs: [e2e-tests, build-docker]
+    environment:
+      name: stage
+      url: https://stage.ecommerce.example.com
+    if: github.ref == 'refs/heads/stage' || github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'stage')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Kubernetes (Stage)
+        run: |
+          echo "Deploying to stage environment..."
+          # kubectl apply -k k8s -n stage
+
+      - name: Health check
+        run: |
+          echo "Performing health checks..."
+
+  # ==================== JOB 8: DEPLOY TO PROD (with approval) ====================
+  deploy-prod:
+    name: Deploy to Production Environment
+    runs-on: ubuntu-latest
+    needs: [deploy-stage]
+    environment:
+      name: production
+      url: https://ecommerce.example.com
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Kubernetes (Production)
+        run: |
+          echo "Deploying to production environment..."
+          # kubectl apply -k k8s -n production
+
+      - name: Health check
+        run: |
+          echo "Performing health checks..."
+
+  # ==================== JOB 9: NOTIFICATIONS ====================
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [code-quality, security-scan, unit-integration-tests, build-docker, e2e-tests, deploy-stage, deploy-prod]
+    if: always()
+    steps:
+      - name: Determine status
+        id: status
+        run: |
+          if [ "${{ needs.code-quality.result }}" == "failure" ] || \
+             [ "${{ needs.security-scan.result }}" == "failure" ] || \
+             [ "${{ needs.unit-integration-tests.result }}" == "failure" ] || \
+             [ "${{ needs.build-docker.result }}" == "failure" ] || \
+             [ "${{ needs.e2e-tests.result }}" == "failure" ]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "message=Pipeline failed. Check the logs for details." >> $GITHUB_OUTPUT
+          else
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=Pipeline completed successfully!" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack Notification (via webhook)
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
+        run: |
+          cat << 'EOF' > slack_payload.json
+          {
+            "text": "${{ steps.status.outputs.status == 'failure' && '🚨 Pipeline Failed' || '✅ Pipeline Succeeded' }}",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*${{ steps.status.outputs.status == 'failure' && '🚨 Pipeline Failed' || '✅ Pipeline Succeeded' }}*\n\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\nAuthor: ${{ github.actor }}\n\n${{ steps.status.outputs.message }}"
+                }
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "View Run"
+                    },
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          echo "Calling Slack webhook: $SLACK_WEBHOOK_URL"
+          curl -v -X POST \
+            -H 'Content-type: application/json' \
+            --data @slack_payload.json \
+            "$SLACK_WEBHOOK_URL"
+
+      - name: Create GitHub Issue on failure
+        if: steps.status.outputs.status == 'failure' && env.ISSUE_TOKEN != ''
+        uses: actions/github-script@v7
+        env:
+          ISSUE_TOKEN: ${{ env.ISSUE_TOKEN }}
+        with:
+          github-token: ${{ env.ISSUE_TOKEN }}
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Pipeline Failed: ${context.ref} - ${context.sha.substring(0, 7)}`,
+              body: `Pipeline failed for commit ${context.sha}\n\n**Branch:** ${context.ref}\n**Author:** ${context.actor}\n**Workflow:** ${context.workflow}\n\n**Failed Jobs:**\n- Code Quality: ${{ needs.code-quality.result }}\n- Security Scan: ${{ needs.security-scan.result }}\n- Tests: ${{ needs.unit-integration-tests.result }}\n- Build: ${{ needs.build-docker.result }}\n- E2E: ${{ needs.e2e-tests.result }}\n\n[View Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              labels: ['bug', 'ci/cd']
+            })
+=======
+

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+	<!-- 
+		Archivo de supresiones para OWASP Dependency-Check.
+		Este archivo se usa para suprimir falsos positivos o vulnerabilidades conocidas que no aplican.
+		
+		Ejemplo de uso:
+		
+		<suppress>
+			<notes><![CDATA[Falso positivo - esta dependencia no se usa en producción]]></notes>
+			<gav>com.example:library:1.2.3</gav>
+			<cve>CVE-2023-12345</cve>
+		</suppress>
+	-->
+</suppressions>
+

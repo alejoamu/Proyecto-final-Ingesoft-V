@@ -1,4 +1,3 @@
-
 # e-Commerce-boot μServices 
 
 ## Important Note: This project's new milestone is to move The whole system to work on Kubernetes, so stay tuned.
@@ -774,3 +773,1820 @@ Sugerencia: Si trabajas en `dev`, puedes revisar los artifacts generados (site.z
   - Payment: `GET /payment-service/api/payments`
   - Shipping: `GET /shipping-service/api/shippings`
   - Favourite: `GET /favourite-service/api/favourites`
+
+# e-Commerce-boot μServices 
+
+## Calidad de Código y Seguridad
+
+Esta sección describe cómo ejecutar análisis de calidad (SonarQube) y escaneo de vulnerabilidades (Trivy).
+
+### SonarQube Local
+1. Levanta SonarQube dentro del landscape principal (requiere red creada por core.yml previamente):
+```
+docker compose -f compose.yml up -d sonarqube
+```
+(O si solo quieres SonarQube: `docker run -d --name sonarqube -p 9000:9000 sonarqube:9.9-community`)
+2. Accede a http://localhost:9000 y crea un token (Administración -> Seguridad).
+3. En PowerShell exporta variables:
+```
+$Env:SONAR_HOST_URL="http://localhost:9000"
+$Env:SONAR_TOKEN="<tu_token>"
+```
+4. Ejecuta el script:
+```
+quality-scan.cmd
+```
+Esto compila, ejecuta tests con cobertura (JaCoCo) y sube resultados a SonarQube.
+
+### Trivy Local
+Ejecuta escaneo de dependencias, código y luego imágenes:
+```
+trivy-scan.cmd
+```
+Los reportes se generan en `security-reports/`. El script fallará por vulnerabilidades HIGH/CRITICAL (mostrará mensajes) pero continúa listando reportes.
+
+### OWASP Dependency-Check Local
+Ejecuta escaneo de vulnerabilidades en dependencias Maven (complementa Trivy):
+```
+owasp-scan.cmd    # Windows
+./owasp-scan.sh   # Linux/macOS
+```
+El escaneo analiza todas las dependencias declaradas en `pom.xml` de cada microservicio y busca vulnerabilidades conocidas en la base de datos de OWASP.
+
+**Reportes generados:**
+- HTML: `{module}/target/dependency-check-report.html` - Reporte visual detallado
+- JSON: `{module}/target/dependency-check-report.json` - Para procesamiento automatizado
+- XML: `{module}/target/dependency-check-report.xml` - Para integración con otras herramientas
+
+Los reportes también se copian a `security-reports/owasp/` para consulta centralizada.
+
+**Configuración:**
+- Umbral CVSS: El build falla si se encuentran vulnerabilidades con CVSS >= 7.0 (configurable en `pom.xml`)
+- Actualización automática: La base de datos de vulnerabilidades se actualiza automáticamente
+- Supresiones: Archivo `owasp-suppressions.xml` para suprimir falsos positivos o vulnerabilidades conocidas
+
+### Pipeline CI
+El workflow `code-quality.yml` ejecuta automáticamente:
+- Build + tests + cobertura
+- Análisis Sonar (requiere secretos `SONAR_HOST_URL` y `SONAR_TOKEN` en GitHub)
+- **OWASP Dependency-Check** para escaneo de dependencias Maven
+- Escaneo Trivy filesystem e imágenes (falla en severidades HIGH/CRITICAL)
+
+Los reportes de OWASP se publican como artefactos en GitHub Actions y están disponibles en la pestaña "Actions" de cada ejecución.
+
+### Reportes de Seguridad en GitHub Pages
+El workflow `ci-all-pages.yml` ejecuta OWASP Dependency-Check y publica los reportes en GitHub Pages:
+- **Ubicación**: `https://{usuario}.github.io/{repo}/security/`
+- **Estructura**: Reportes HTML organizados por microservicio
+- **Actualización**: Se actualiza automáticamente en cada push a `main`, `master` o `dev`
+
+### Ajustes y Exclusiones
+Las exclusiones configuradas en `sonar-project.properties` ignoran carpetas de infraestructura (`k8s`, `infra`, `Ansible`, artefactos `target`, pruebas de rendimiento, e2e, archivos binarios y diagramas). Ajusta estas listas según evolucionen los módulos de pruebas.
+
+### Política Inicial
+- Cobertura mínima aspirada: 60% (ajustable en Sonar Quality Gate).
+- 0 vulnerabilidades HIGH/CRITICAL aceptadas en escaneos Trivy.
+- Sin code smells críticos nuevos en ramas principales.
+
+### Herramientas de Seguridad Implementadas
+
+#### OWASP Dependency-Check 
+- **Propósito**: Escanea dependencias Maven en busca de vulnerabilidades conocidas (CVE)
+- **Integración**: Plugin Maven en `pom.xml`, scripts locales, workflows CI/CD
+- **Reportes**: HTML, JSON, XML generados automáticamente
+- **Ejecución automática**: En pipelines de CI/CD y disponible localmente
+
+#### Trivy 
+- **Propósito**: Escanea filesystem, imágenes Docker y Dockerfiles
+- **Integración**: Scripts locales, workflows CI/CD
+- **Reportes**: Tablas en consola, SARIF para GitHub Security
+
+#### SonarQube 
+- **Propósito**: Análisis estático de código, calidad y seguridad
+- **Integración**: Plugin Maven, workflows CI/CD
+- **Reportes**: Dashboard web en SonarQube
+
+### Escaneo Continuo de Vulnerabilidades
+
+**Escaneo Programado Diario:**
+- Workflow: `.github/workflows/security-scan-scheduled.yml`
+- Ejecuta diariamente a las 2 AM UTC
+- Escanea todos los microservicios con:
+  - OWASP Dependency-Check
+  - Trivy filesystem scan
+  - Trivy Dockerfile scan
+  - Trivy container image scan
+- Reportes subidos a GitHub Security como SARIF
+
+### Próximos Pasos
+- Agregar agregación de cobertura global.
+- Integrar análisis adicional (SpotBugs) si es necesario.
+- Endurecer Quality Gate (duplications, mantenibilidad) tras estabilizar cobertura.
+
+## Patrones de Diseño
+
+Esta sección documenta los patrones de diseño utilizados en la arquitectura de microservicios del proyecto, incluyendo patrones arquitectónicos, de resiliencia y de configuración.
+
+### Patrones Arquitectónicos Existentes
+
+#### 1. **API Gateway Pattern**
+- **Ubicación**: `api-gateway/`
+- **Implementación**: Spring Cloud Gateway
+- **Propósito**: Actúa como punto de entrada único para todas las peticiones de cliente, centralizando el enrutamiento, autenticación y autorización.
+- **Beneficios**: 
+  - Simplifica la comunicación del cliente hacia múltiples microservicios
+  - Centraliza la autenticación/autorización
+  - Facilita el versionamiento de APIs
+  - Proporciona un punto único para aplicar políticas cross-cutting
+
+#### 2. **Service Discovery Pattern**
+- **Ubicación**: `service-discovery/`
+- **Implementación**: Netflix Eureka
+- **Propósito**: Permite que los microservicios se registren y descubran dinámicamente sin necesidad de configuración estática de URLs.
+- **Beneficios**:
+  - Desacoplamiento entre servicios (no necesitan conocer direcciones IP/puertos)
+  - Escalabilidad dinámica (servicios pueden agregarse/removerse sin reconfiguración)
+  - Tolerancia a fallos (balanceo de carga automático)
+  - Auto-registro y des-registro de servicios
+
+#### 3. **External Configuration Pattern (Configuration Server)**
+- **Ubicación**: `cloud-config/`
+- **Implementación**: Spring Cloud Config Server
+- **Propósito**: Centraliza la configuración de todos los microservicios en un servidor dedicado, permitiendo gestionar configuraciones por ambiente.
+- **Beneficios**:
+  - Gestión centralizada de configuración
+  - Diferentes configuraciones por ambiente (dev, stage, prod)
+  - Versionamiento de configuraciones
+  - Reducción de duplicación de configuración
+  - Soporte para configuración desde repositorios Git
+
+#### 4. **Proxy Pattern**
+- **Ubicación**: `proxy-client/`
+- **Implementación**: Spring Cloud OpenFeign
+- **Propósito**: Proporciona un proxy/cliente para comunicación entre microservicios, encapsulando la lógica de llamadas HTTP.
+- **Beneficios**:
+  - Abstracción de la comunicación HTTP
+  - Integración con Service Discovery
+  - Soporte para circuit breakers y retry
+  - Declaración de interfaces tipo REST
+
+#### 5. **Repository Pattern**
+- **Ubicación**: Todos los servicios (ej: `product-service/src/main/java/.../repository/`)
+- **Implementación**: Spring Data JPA
+- **Propósito**: Abstrae la lógica de acceso a datos, proporcionando una interfaz más orientada a objetos sobre la capa de persistencia.
+- **Beneficios**:
+  - Separación de responsabilidades entre lógica de negocio y acceso a datos
+  - Facilita el testing (mock de repositorios)
+  - Independencia de la implementación de base de datos
+  - Reducción de boilerplate code
+
+#### 6. **Service Layer Pattern**
+- **Ubicación**: Todos los servicios (ej: `product-service/src/main/java/.../service/`)
+- **Implementación**: Interfaces y clases de servicio con anotación `@Service`
+- **Propósito**: Encapsula la lógica de negocio, separándola de la capa de presentación y acceso a datos.
+- **Beneficios**:
+  - Separación de responsabilidades
+  - Reutilización de lógica de negocio
+  - Facilita testing unitario
+  - Permite transacciones `@Transactional`
+
+#### 7. **DTO (Data Transfer Object) Pattern**
+- **Ubicación**: Todos los servicios (ej: `product-service/src/main/java/.../dto/`)
+- **Implementación**: Clases DTO dedicadas
+- **Propósito**: Objetos que transportan datos entre procesos o capas de la aplicación sin exponer la estructura interna de las entidades.
+- **Beneficios**:
+  - Reduce el acoplamiento entre capas
+  - Optimiza transferencia de datos (solo campos necesarios)
+  - Oculta estructura interna de entidades
+  - Facilita versionamiento de APIs
+
+#### 8. **Database per Service Pattern**
+- **Ubicación**: Todos los servicios tienen su propia base de datos
+- **Implementación**: Cada microservicio tiene su esquema SQL propio
+- **Propósito**: Cada microservicio tiene su propia base de datos, garantizando independencia de datos.
+- **Beneficios**:
+  - Independencia de datos entre servicios
+  - Escalabilidad independiente por servicio
+  - Tecnologías heterogéneas de base de datos posibles
+  - Evita acoplamiento a nivel de datos
+
+#### 9. **Microservices Architecture Pattern**
+- **Implementación**: 10 microservicios independientes (api-gateway, service-discovery, cloud-config, proxy-client, user-service, product-service, favourite-service, order-service, shipping-service, payment-service)
+- **Propósito**: Arquitectura que estructura una aplicación como una colección de servicios débilmente acoplados.
+- **Beneficios**:
+  - Escalabilidad independiente por servicio
+  - Desarrollo y despliegue independiente
+  - Tecnologías heterogéneas posibles
+  - Aislamiento de fallos
+
+#### 10. **Event-Driven Architecture**
+- **Implementación**: Kafka mencionado en `compose.yml`
+- **Propósito**: Los servicios se comunican mediante eventos asíncronos.
+- **Beneficios**:
+  - Desacoplamiento temporal
+  - Escalabilidad mejorada
+  - Resiliencia mejorada
+  - Soporte para procesamiento asíncrono
+
+### Patrones de Resiliencia
+
+#### 1. **Circuit Breaker Pattern** 
+- **Ubicación**: Todos los servicios en `application.yml`
+- **Implementación**: Resilience4j Circuit Breaker
+- **Propósito**: Previene fallos en cascada al detectar problemas y "abrir el circuito" cuando un servicio falla repetidamente.
+- **Configuración actual**:
+  - `failure-rate-threshold: 50%` - Abre el circuito cuando el 50% de las llamadas fallan
+  - `sliding-window-size: 10` - Ventana de evaluación de 10 llamadas
+  - `wait-duration-in-open-state: 5s` - Espera 5 segundos antes de intentar de nuevo
+  - `minimum-number-of-calls: 5` - Requiere mínimo 5 llamadas antes de evaluar
+- **Beneficios**:
+  - Tolerancia a fallos mejorada
+  - Evita sobrecarga del sistema cuando hay servicios caídos
+  - Recuperación automática cuando el servicio se restaura
+  - Métricas expuestas vía Actuator
+
+#### 2. **Retry Pattern** (Implementado)
+- **Ubicación**: `proxy-client/`, `user-service/`, `product-service/` en `application.yml`
+- **Implementación**: Resilience4j Retry
+- **Propósito**: Reintenta automáticamente operaciones fallidas con estrategias de backoff configuradas.
+- **Configuración actual**:
+  - `max-attempts: 3` - Realiza hasta 3 intentos antes de fallar
+  - `wait-duration: 1000ms` - Espera 1 segundo entre intentos
+  - `exponential-backoff-multiplier: 2` - Aumenta exponencialmente el tiempo de espera
+  - Reintenta solo en excepciones específicas: `ConnectException`, `SocketTimeoutException`, `ResourceAccessException`
+  - Ignora excepciones de validación que no deben reintentarse
+- **Beneficios**:
+  - Manejo automático de fallos transitorios de red
+  - Mejora significativamente la tasa de éxito de operaciones
+  - Reduce la necesidad de lógica manual de reintento en el código
+  - Configurable por servicio u operación específica
+  - Backoff exponencial evita saturar servicios que se están recuperando
+- **Uso**: Se aplica automáticamente en llamadas Feign Client y puede usarse con anotación `@Retry(name = "proxyService")` en métodos de servicio.
+
+### Patrones de Configuración
+
+#### 1. **External Configuration Pattern** 
+- **Ubicación**: `cloud-config/` y uso en todos los servicios
+- **Implementación**: Spring Cloud Config Server
+- **Propósito**: Centraliza la configuración externa de todos los microservicios.
+- **Beneficios**:
+  - Configuración centralizada
+  - Gestión por ambientes
+  - Versionamiento de configuración
+  - Reducción de duplicación
+
+#### 2. **Configuration Refresh Pattern** (Implementado)
+- **Ubicación**: 
+  - `proxy-client/`, `user-service/`, `product-service/` en `application.yml`
+  - Clases de configuración con `@RefreshScope` (ej: `ClientConfig.java`)
+- **Implementación**: Spring Cloud Config Refresh con `@RefreshScope` y endpoint `/actuator/refresh`
+- **Propósito**: Permite actualizar la configuración de los servicios sin necesidad de reiniciarlos mediante el endpoint de refresh.
+- **Configuración**:
+  - Endpoint habilitado: `management.endpoint.refresh.enabled: true`
+  - Endpoint expuesto: `POST /actuator/refresh`
+  - Beans con `@RefreshScope` se recargan dinámicamente
+- **Cómo usar**:
+  1. Actualizar configuración en el servidor de configuración (Cloud Config)
+  2. Llamar al endpoint: `POST http://localhost:PORT/actuator/refresh`
+  3. Los beans marcados con `@RefreshScope` se recrean con la nueva configuración
+- **Beneficios**:
+  - Actualización de configuración sin downtime (sin reiniciar servicios)
+  - Aplicación dinámica e inmediata de cambios de configuración
+  - Mejora significativa la operabilidad del sistema
+  - Reducción de tiempo de recuperación tras cambios (de minutos a segundos)
+  - Permite ajustar parámetros de runtime sin interrumpir el servicio
+- **Ejemplo de uso**:
+  ```bash
+  # Refrescar configuración del user-service
+  curl -X POST http://localhost:8700/user-service/actuator/refresh
+  
+  # Refrescar configuración del proxy-client
+  curl -X POST http://localhost:8900/app/actuator/refresh
+  ```
+
+### Detalles de Implementación de Patrones Nuevos
+
+#### Implementación del Patrón Retry
+
+El patrón Retry se ha implementado usando Resilience4j en los servicios que realizan llamadas externas. La configuración se encuentra en los archivos `application.yml` de cada servicio.
+
+**Configuración (proxy-client):**
+```yaml
+resilience4j:
+  retry:
+    instances:
+      proxyService:
+        max-attempts: 3
+        wait-duration: 1000
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - java.net.ConnectException
+          - java.net.SocketTimeoutException
+          - org.springframework.web.client.ResourceAccessException
+          - feign.RetryableException
+        ignore-exceptions:
+          - java.lang.IllegalArgumentException
+          - javax.validation.ValidationException
+
+feign:
+  circuitbreaker:
+    enabled: true
+  resilience4j:
+    enabled: true
+```
+
+**Cómo funciona:**
+- Resilience4j Retry se aplica automáticamente a todos los Feign Clients cuando `feign.resilience4j.enabled=true`
+- Cuando una llamada falla con una excepción configurada en `retry-exceptions`, el sistema reintenta hasta `max-attempts` veces
+- Entre cada intento espera `wait-duration` milisegundos, multiplicado por `exponential-backoff-multiplier` en cada intento (backoff exponencial)
+- Las excepciones de validación (configuradas en `ignore-exceptions`) no se reintentan, ya que son errores permanentes
+- Se integra con Circuit Breaker: si el Circuit Breaker está abierto, no se intentan reintentos
+
+**Implementación:**
+- `FeignClientConfig.java`: Configuración de Feign con beans refreshables que usan propiedades del Config Server
+- Todos los `@FeignClient` interfaces automáticamente usan Resilience4j Retry
+- Configuración puede ser sobrescrita desde Config Server y refrescada dinámicamente
+
+**Servicios implementados:**
+- `proxy-client` - Retry en todos los Feign Clients (ProductClientService, UserClientService, OrderClientService, etc.)
+- `user-service` - Retry configurado
+- `product-service` - Retry configurado
+
+#### Implementación del Patrón Configuration Refresh
+
+El patrón Configuration Refresh permite actualizar configuraciones dinámicamente sin reiniciar los servicios mediante Spring Cloud Config Server.
+
+**Componentes implementados:**
+
+1. **Habilitación del Config Server:**
+```yaml
+spring:
+  cloud:
+    config:
+      enabled: true
+      fail-fast: false
+      retry:
+        initial-interval: 1000
+        max-attempts: 6
+        max-interval: 2000
+        multiplier: 1.1
+
+management:
+  endpoint:
+    refresh:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,refresh,metrics,prometheus
+```
+
+2. **Propiedades Refreshables (`RefreshableProperties.java`):**
+```java
+@Component
+@RefreshScope
+public class RefreshableProperties {
+    @Value("${app.api.timeout:10000}")
+    private int apiTimeout;
+    
+    @Value("${app.api.max-retries:3}")
+    private int maxRetries;
+}
+```
+
+3. **Beans Refreshables:**
+```java
+@Bean
+@RefreshScope
+public Request.Options requestOptions(RefreshableProperties props) {
+    return new Request.Options(/* usa props.getApiTimeout() */);
+}
+```
+
+**Proceso completo de refresh:**
+
+1. **Actualizar configuración en Config Server:**
+   - Editar archivo en el repositorio Git del Config Server (ej: `proxy-client-dev.yml`)
+   - Commit y push al repositorio
+
+2. **Llamar al endpoint de refresh:**
+   ```bash
+   curl -X POST http://localhost:8900/app/actuator/refresh
+   # Respuesta: ["app.api.timeout", "app.api.max-retries"] - lista de propiedades refrescadas
+   ```
+
+3. **Spring automáticamente:**
+   - Recarga las propiedades del Config Server
+   - Destruye y recrea todos los beans marcados con `@RefreshScope`
+   - Los nuevos valores se aplican inmediatamente sin reiniciar el servicio
+
+**Archivos de configuración del Config Server:**
+Los archivos de configuración deben estar en el repositorio Git del Config Server (configurado en `cloud-config/src/main/resources/application.yml`). 
+La estructura típica incluye archivos como `proxy-client-dev.yml`, `user-service-dev.yml`, `product-service-dev.yml` con las propiedades 
+refreshables definidas (ej: `app.api.timeout`, `app.user.max-results`, etc.).
+
+**Beneficios en producción:**
+- Ajustar timeouts sin downtime
+- Modificar límites de resultados por consulta
+- Habilitar/deshabilitar features (feature flags)
+- Actualizar parámetros de retry dinámicamente
+- Cambiar configuración de cache sin reiniciar
+
+**Servicios implementados:**
+- `proxy-client` - RefreshableProperties + FeignClientConfig refreshable
+- `user-service` - RefreshableProperties + endpoint refresh habilitado
+- `product-service` - RefreshableProperties + endpoint refresh habilitado
+
+### Documentación Detallada
+
+Para más detalles sobre los patrones, consulta el archivo `Docs/PATRONES_DISENO.md` que contiene un análisis más profundo de los patrones y recomendaciones adicionales.
+
+## Observabilidad y Monitoreo
+
+Esta sección describe cómo implementar y usar el stack de monitoreo con Prometheus y Grafana para observar métricas de los microservicios.
+
+### Stack de Monitoreo: Prometheus + Grafana
+
+El proyecto incluye un stack completo de monitoreo implementado con:
+- **Prometheus**: Sistema de monitoreo y base de datos de series temporales
+- **Grafana**: Plataforma de visualización y dashboards
+- **Micrometer**: Métricas de Spring Boot expuestas en formato Prometheus
+
+### Configuración de Métricas en Microservicios
+
+Todos los microservicios están configurados para exponer métricas Prometheus a través del endpoint `/actuator/prometheus`:
+
+**Configuración en `application.yml`:**
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+```
+
+**Dependencias en `pom.xml`:**
+- `spring-boot-starter-actuator` - Endpoints de monitoreo
+- `micrometer-registry-prometheus` - Exportador de métricas Prometheus
+
+### Ejecutar con Docker Compose
+
+**1. Levantar servicios de monitoreo:**
+```bash
+docker network create microservices_network || true
+
+docker compose -f compose.yml up -d prometheus grafana
+```
+
+**2. Acceder a las interfaces:**
+
+- **Prometheus**: http://localhost:9090
+  - Consulta métricas directamente usando PromQL
+  - Ejemplo: `rate(http_server_requests_seconds_count[5m])`
+  
+- **Grafana**: http://localhost:3000
+  - Usuario: `admin`
+  - Contraseña: `admin`
+  - El dashboard "Ecommerce Microservices - Overview" se carga automáticamente
+
+**3. Endpoints de métricas de cada servicio:**
+
+```
+API Gateway:        http://localhost:8080/actuator/prometheus
+Proxy Client:       http://localhost:8900/app/actuator/prometheus
+User Service:       http://localhost:8700/user-service/actuator/prometheus
+Product Service:    http://localhost:8500/product-service/actuator/prometheus
+Order Service:      http://localhost:8300/order-service/actuator/prometheus
+Payment Service:    http://localhost:8400/payment-service/actuator/prometheus
+Shipping Service:   http://localhost:8600/shipping-service/actuator/prometheus
+Favourite Service:  http://localhost:8800/favourite-service/actuator/prometheus
+Service Discovery:  http://localhost:8761/actuator/prometheus
+Cloud Config:       http://localhost:9296/actuator/prometheus
+```
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de monitoreo:**
+```bash
+kubectl apply -f k8s/prometheus.yaml
+kubectl apply -f k8s/grafana.yaml
+
+kubectl get pods -n monitoring
+kubectl get svc -n monitoring
+```
+
+**2. Acceder a los servicios:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n monitoring svc/prometheus 9090:9090
+
+kubectl port-forward -n monitoring svc/grafana 3000:3000
+```
+
+O directamente via NodePort (si está configurado):
+- Prometheus: `http://<node-ip>:30090`
+- Grafana: `http://<node-ip>:30000`
+
+### Métricas Disponibles
+
+Las métricas expuestas incluyen:
+
+**Métricas HTTP:**
+- `http_server_requests_seconds_count` - Contador de solicitudes HTTP
+- `http_server_requests_seconds_sum` - Tiempo total de respuesta
+- `http_server_requests_seconds_max` - Tiempo máximo de respuesta
+- Métricas por código de estado (2xx, 4xx, 5xx)
+
+**Métricas de Circuit Breaker (Resilience4j):**
+- `resilience4j_circuitbreaker_state` - Estado del circuit breaker (OPEN/CLOSED/HALF_OPEN)
+- `resilience4j_circuitbreaker_calls` - Llamadas totales
+- `resilience4j_circuitbreaker_failure_rate` - Tasa de fallos
+
+**Métricas de Retry (Resilience4j):**
+- `resilience4j_retry_calls_total` - Intentos de retry por tipo (successful/retry/error)
+- `resilience4j_retry_attempts` - Intentos realizados
+
+**Métricas de JVM:**
+- `jvm_memory_used_bytes` - Memoria usada
+- `jvm_gc_pause_seconds` - Pausas de garbage collection
+- `jvm_threads_live` - Hilos activos
+
+**Métricas de Sistema:**
+- `process_cpu_usage` - Uso de CPU
+- `system_load_average_1m` - Carga del sistema
+
+### Dashboards de Grafana
+
+**Dashboard principal:** "Ecommerce Microservices - Overview"
+
+Vista general de todos los servicios con paneles agregados. Incluye:
+1. **HTTP Request Rate by Service** - Tasa de solicitudes por segundo por servicio
+2. **HTTP Request Latency** - Latencia de solicitudes (percentiles 50, 95, 99)
+3. **HTTP Success Rate** - Tasa de éxito (códigos 2xx)
+4. **HTTP 5xx Errors** - Errores del servidor por servicio
+5. **Circuit Breaker Status** - Estado de los circuit breakers
+6. **Retry Attempts** - Intentos de retry por servicio
+7. **Service Health Status** - Estado de salud de todos los servicios
+
+**Dashboards específicos por servicio:**
+
+Cada microservicio tiene su propio dashboard detallado con métricas relevantes:
+
+1. **API Gateway Dashboard** (`api-gateway.json`)
+   - Request Rate y Latency por endpoint
+   - HTTP Status Codes
+   - Circuit Breaker Status
+   - Requests por ruta configurada
+   - JVM Memory y CPU Usage
+
+2. **User Service Dashboard** (`user-service.json`)
+   - Métricas de autenticación y usuarios
+   - Latencia de operaciones CRUD
+   - Success Rate y Error Rate
+   - Circuit Breaker y Retry
+   - Métricas de JVM
+
+3. **Product Service Dashboard** (`product-service.json`)
+   - Métricas de catálogo de productos
+   - Requests por endpoint (GET, POST, PUT, DELETE)
+
+**Dashboard de Métricas de Negocio** (`business-metrics.json`):
+
+Dashboard dedicado a métricas relacionadas con el dominio del negocio:
+
+1. **Tasa de Órdenes Creadas** - Órdenes creadas por minuto
+2. **Valor Total de Órdenes** - Valor acumulado y total de órdenes
+3. **Valor Promedio por Orden** - Gauge con el valor promedio
+4. **Tasa de Pagos (Exitosos vs Fallidos)** - Comparación de pagos exitosos y fallidos
+5. **Tasa de Registro de Usuarios** - Nuevos usuarios registrados por minuto
+6. **Usuarios Activos** - Gauge con el número actual de usuarios activos
+7. **Tasa de Productos (Creados vs Actualizados)** - Productos creados y actualizados
+8. **Total de Productos en Catálogo** - Gauge con el total de productos disponibles
+9. **Pagos por Estado** - Distribución de pagos por estado (NOT_STARTED, IN_PROGRESS, COMPLETED)
+10. **Tasa de Éxito de Pagos** - Porcentaje de pagos exitosos
+11. **Tasa de Órdenes Eliminadas** - Órdenes eliminadas por minuto
+
+Este dashboard mide aspectos relacionados con el valor del negocio y el dominio, complementando las métricas técnicas.
+   - Latencia de búsquedas y consultas
+   - Circuit Breaker Status
+   - Métricas de rendimiento
+
+4. **Order Service Dashboard** (`order-service.json`)
+   - Métricas de procesamiento de órdenes
+   - Latencia de creación de órdenes
+   - Tasa de éxito de transacciones
+   - Circuit Breaker Status
+   - Métricas de JVM
+
+5. **Payment Service Dashboard** (`payment-service.json`)
+   - Métricas de procesamiento de pagos
+   - Latencia de transacciones
+   - Tasa de éxito de pagos
+   - Circuit Breaker Status (crítico para pagos)
+   - Métricas de seguridad
+
+6. **Shipping Service Dashboard** (`shipping-service.json`)
+   - Métricas de gestión de envíos
+   - Latencia de operaciones
+   - Success Rate
+   - Circuit Breaker Status
+   - Métricas de JVM
+
+7. **Favourite Service Dashboard** (`favourite-service.json`)
+   - Métricas de favoritos de usuarios
+   - Latencia de operaciones
+   - Success Rate
+   - Circuit Breaker Status
+   - Métricas de JVM
+
+8. **Proxy Client Dashboard** (`proxy-client.json`)
+   - Métricas de proxy y routing
+   - Latencia de llamadas entre servicios
+   - Circuit Breaker Status
+   - Retry Attempts
+   - Métricas de JVM
+
+**Cada dashboard de servicio incluye:**
+- **Request Rate (req/s)** - Tasa de solicitudes por segundo
+- **Request Latency (ms)** - Latencia p50, p95, p99
+- **Success Rate (%)** - Porcentaje de solicitudes exitosas (2xx)
+- **Error Rate (5xx)** - Tasa de errores del servidor
+- **HTTP Status Codes** - Distribución de códigos de estado
+- **Circuit Breaker Status** - Estado de circuit breakers del servicio
+- **JVM Memory Usage** - Uso de memoria heap
+- **CPU Usage (%)** - Uso de CPU del proceso
+- **Requests by Endpoint** - Solicitudes desglosadas por URI
+- **Service Health Status** - Estado de salud del servicio
+
+**Acceder a los dashboards:**
+1. Accede a Grafana (http://localhost:3000)
+2. Ve a Dashboards > Microservices
+3. Selecciona el dashboard del servicio que deseas visualizar
+
+**Personalizar dashboards:**
+1. Accede a Grafana (http://localhost:3000)
+2. Ve a Dashboards > Microservices
+3. Selecciona el dashboard que deseas editar
+4. Haz clic en "Edit" para modificar paneles
+5. Usa PromQL queries para agregar nuevas métricas
+
+**Regenerar dashboards:**
+Si necesitas regenerar los dashboards (por ejemplo, después de agregar nuevos servicios), ejecuta:
+```bash
+python monitoring/grafana/scripts/create_service_dashboard.py
+```
+
+### Consultas PromQL Útiles
+
+**Tasa de solicitudes por servicio:**
+```promql
+sum(rate(http_server_requests_seconds_count[5m])) by (application)
+```
+
+**Latencia p99 por servicio:**
+```promql
+histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application)) * 1000
+```
+
+**Tasa de éxito (códigos 2xx):**
+```promql
+sum(rate(http_server_requests_seconds_count{status=~"2.."}[5m])) by (application) 
+/ 
+sum(rate(http_server_requests_seconds_count[5m])) by (application)
+```
+
+**Circuit breakers abiertos:**
+```promql
+resilience4j_circuitbreaker_state{state="open"}
+```
+
+**Errores 5xx por servicio:**
+```promql
+sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application, status)
+```
+
+### Métricas de Negocio
+
+Además de las métricas técnicas, el proyecto implementa **métricas de negocio** que miden aspectos relacionados con el dominio y el valor generado por la aplicación.
+
+
+**Dashboard de Métricas de Negocio:**
+
+Un dashboard dedicado (`business-metrics.json`) visualiza todas las métricas de negocio con 11 paneles diferentes.
+
+**Consultas PromQL para Métricas de Negocio:**
+
+```promql
+# Órdenes creadas por minuto
+sum(rate(business_orders_created_total[5m]))
+
+# Valor total de órdenes
+sum(business_orders_value_sum)
+
+# Valor promedio por orden
+sum(business_orders_value_sum) / sum(business_orders_value_count)
+
+# Pagos exitosos vs fallidos
+sum(rate(business_payments_successful_total[5m]))  # Exitosos
+sum(rate(business_payments_failed_total[5m]))      # Fallidos
+
+# Tasa de éxito de pagos
+sum(rate(business_payments_successful_total[5m])) 
+/ 
+(sum(rate(business_payments_successful_total[5m])) + sum(rate(business_payments_failed_total[5m])))
+
+# Usuarios registrados por minuto
+sum(rate(business_users_registered_total[5m]))
+
+# Usuarios activos actuales
+business_users_active
+
+# Productos en catálogo
+business_products_total
+```
+
+**Implementación:**
+
+Las métricas de negocio se implementan usando **Micrometer** en cada servicio. Archivos de implementación:
+- `order-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+- `payment-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+- `user-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+- `product-service/src/main/java/com/selimhorri/app/metrics/BusinessMetricsService.java`
+
+**Para más detalles**, consulta `Docs/BUSINESS_METRICS.md`.
+
+### Configuración de Prometheus
+
+El archivo de configuración está en `monitoring/prometheus/prometheus.yml` y define:
+
+- **Intervalo de scraping**: 15 segundos
+- **Retención de datos**: 30 días
+- **Targets**: Todos los microservicios configurados para scraping
+
+Para modificar la configuración:
+1. Edita `monitoring/prometheus/prometheus.yml`
+2. Reinicia Prometheus:
+   ```bash
+   # Docker Compose
+   docker compose -f compose.yml restart prometheus
+   
+   # Kubernetes - recarga la configuración
+   curl -X POST http://localhost:9090/-/reload
+   ```
+
+### Archivos de Configuración
+
+**Estructura de monitoreo:**
+```
+monitoring/
+├── prometheus/
+│   └── prometheus.yml          # Configuración de Prometheus
+└── grafana/
+    ├── provisioning/
+    │   ├── datasources/
+    │   │   └── prometheus.yml  # Datasource de Prometheus
+    │   └── dashboards/
+    │       └── dashboard.yml   # Configuración de dashboards
+    ├── dashboards/
+    │   ├── microservices-overview.json  # Dashboard principal (overview)
+    │   ├── api-gateway.json             # Dashboard API Gateway
+    │   ├── user-service.json            # Dashboard User Service
+    │   ├── product-service.json         # Dashboard Product Service
+    │   ├── order-service.json           # Dashboard Order Service
+    │   ├── payment-service.json         # Dashboard Payment Service
+    │   ├── shipping-service.json        # Dashboard Shipping Service
+    │   ├── favourite-service.json       # Dashboard Favourite Service
+    │   ├── proxy-client.json            # Dashboard Proxy Client
+    │   └── business-metrics.json        # Dashboard de Métricas de Negocio
+    └── scripts/
+        └── create_service_dashboard.py  # Script para generar dashboards
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/prometheus.yaml` - Deployment, Service y ConfigMap de Prometheus
+- `k8s/grafana.yaml` - Deployment, Service y ConfigMaps de Grafana
+
+## Seguridad
+
+Esta sección describe las implementaciones de seguridad del proyecto: escaneo continuo de vulnerabilidades, gestión segura de secretos, RBAC y TLS.
+
+### Escaneo Continuo de Vulnerabilidades
+
+El proyecto implementa un sistema completo de escaneo continuo de vulnerabilidades:
+
+**1. OWASP Dependency-Check**
+- Escanea dependencias Maven automáticamente
+- Integrado en pipelines CI/CD
+- Ejecución diaria programada (2 AM UTC)
+- Reportes HTML, JSON y XML
+
+**2. Trivy**
+- Escaneo de filesystem, Dockerfiles e imágenes
+- Integrado en pipelines CI/CD
+- Ejecución diaria programada
+- Reportes SARIF para GitHub Security
+
+**3. Escaneo Programado Diario**
+- Workflow: `.github/workflows/security-scan-scheduled.yml`
+- Ejecuta todos los días a las 2 AM UTC
+- Escanea todos los servicios automáticamente
+- Reportes consolidados en GitHub Security
+
+**Ejecución Local:**
+```bash
+# OWASP Dependency-Check
+owasp-scan.cmd    # Windows
+./owasp-scan.sh   # Linux/macOS
+
+# Trivy
+trivy fs --severity HIGH,CRITICAL .
+trivy image <image:tag>
+```
+
+### Gestión Segura de Secretos
+
+**Kubernetes Secrets:**
+- Secrets almacenados en Kubernetes
+- Referenciados en deployments usando `secretKeyRef`
+- Ejemplos en `k8s/security/secrets.example.yaml`
+
+**Crear Secrets:**
+```bash
+kubectl create secret generic database-credentials \
+  --from-literal=username=db_user \
+  --from-literal=password=db_password \
+  --namespace=ecommerce
+```
+
+**Uso en Deployments:**
+```yaml
+env:
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: database-credentials
+        key: password
+```
+
+**Recomendado para Producción:**
+- **Sealed Secrets**: Secrets cifrados almacenados en Git
+- **External Secrets Operator**: Integración con AWS Secrets Manager, Vault, etc.
+
+### RBAC (Role-Based Access Control)
+
+**Configuración en:** `k8s/security/rbac.yaml`
+
+**ServiceAccounts:**
+- `microservice-sa` - Para microservicios (namespace: ecommerce)
+- `monitoring-sa` - Para Prometheus/Grafana (namespace: monitoring)
+- `logging-sa` - Para Filebeat/Elasticsearch (namespace: logging)
+
+**Roles y Permisos:**
+- Cada ServiceAccount tiene permisos mínimos necesarios
+- Roles específicos por namespace
+- ClusterRoles solo para recursos de cluster (Prometheus)
+
+**Aplicar RBAC:**
+```bash
+kubectl apply -f k8s/security/rbac.yaml
+```
+
+**Verificar permisos:**
+```bash
+kubectl auth can-i get secrets \
+  --as=system:serviceaccount:ecommerce:microservice-sa \
+  -n ecommerce
+```
+
+### TLS para Servicios Públicos
+
+**Cert-Manager con Let's Encrypt:**
+- Instalación: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml`
+- ClusterIssuers configurados: `k8s/security/cert-manager.yaml`
+- Renovación automática de certificados
+
+**Ingress con TLS:**
+- Configuración en: `k8s/security/ingress-tls.yaml`
+- Anotaciones para redirección HTTP→HTTPS
+- Certificados emitidos automáticamente por Let's Encrypt
+
+**Aplicar TLS:**
+```bash
+# 1. Instalar cert-manager
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+# 2. Aplicar ClusterIssuers
+kubectl apply -f k8s/security/cert-manager.yaml
+
+# 3. Aplicar Ingresses con TLS
+kubectl apply -f k8s/security/ingress-tls.yaml
+```
+
+**Verificar certificados:**
+```bash
+kubectl get certificates -A
+kubectl describe certificate api-gateway-tls -n ecommerce
+```
+## Gestión de Logs con Elasticsearch
+
+Esta sección describe cómo configurar y usar Elasticsearch para la gestión centralizada de logs de todos los microservicios.
+
+### Stack ELK: Elasticsearch + Filebeat
+
+El proyecto incluye una configuración simplificada de ELK Stack centrada en Elasticsearch:
+- **Elasticsearch**: Almacenamiento y búsqueda de logs centralizados
+- **Filebeat**: Agente ligero que recopila logs de contenedores Docker y los envía a Elasticsearch
+- **Logs estructurados**: Los microservicios generan logs en formato JSON para facilitar el análisis
+
+### Ejecutar con Docker Compose
+
+**1. Levantar Elasticsearch y Filebeat:**
+```bash
+docker network create microservices_network || true
+
+docker compose -f compose.yml up -d elasticsearch filebeat
+```
+
+**2. Verificar que Elasticsearch está funcionando:**
+```bash
+curl http://localhost:9200/_cluster/health?pretty
+
+curl http://localhost:9200/_cat/indices?v
+```
+
+**3. Acceso a Elasticsearch:**
+- **Elasticsearch API**: http://localhost:9200
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de logging:**
+```bash
+kubectl apply -f k8s/elasticsearch.yaml
+kubectl apply -f k8s/filebeat.yaml
+
+kubectl get pods -n logging
+kubectl get svc -n logging
+```
+
+**2. Acceder a Elasticsearch:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n logging svc/elasticsearch 9200:9200
+```
+
+O directamente via NodePort:
+- Elasticsearch: `http://<node-ip>:30200`
+
+**3. Verificar logs recopilados:**
+```bash
+curl http://localhost:9200/_cat/indices?v
+
+curl -X GET "http://localhost:9200/ecommerce-microservices-*/_search?pretty" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": {
+      "match": {
+        "container.name": "product-service"
+      }
+    }
+  }'
+```
+
+### Configuración de Filebeat
+
+Filebeat está configurado para:
+- **Recopilar logs**: De todos los contenedores Docker en `/var/lib/docker/containers/`
+- **Auto-descubrimiento**: Detecta automáticamente nuevos contenedores
+- **Formato JSON**: Parsea logs en formato JSON cuando están disponibles
+- **Envío a Elasticsearch**: Indexa logs en Elasticsearch con el patrón `ecommerce-microservices-YYYY.MM.DD`
+
+**Configuración en `elk/filebeat/filebeat.yml`:**
+```yaml
+output.elasticsearch:
+  hosts: ['elasticsearch:9200']
+  index: "ecommerce-microservices-%{+yyyy.MM.dd}"
+```
+
+### Estructura de Logs
+
+Los logs se indexan en Elasticsearch con la siguiente estructura:
+
+**Campos principales:**
+- `@timestamp`: Fecha y hora del log
+- `message`: Contenido del mensaje de log
+- `container.name`: Nombre del contenedor (ej: `product-service-container`)
+- `container.id`: ID del contenedor Docker
+- `json.*`: Campos parseados de logs JSON (si aplica)
+
+### Consultas Útiles en Elasticsearch
+
+**Buscar logs por servicio:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "query": {
+    "wildcard": {
+      "container.name": "*product-service*"
+    }
+  }
+}
+```
+
+**Buscar errores:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "query": {
+    "match": {
+      "message": "ERROR"
+    }
+  }
+}
+```
+
+**Buscar logs en un rango de tiempo:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "query": {
+    "range": {
+      "@timestamp": {
+        "gte": "now-1h",
+        "lte": "now"
+      }
+    }
+  }
+}
+```
+
+**Contar logs por servicio:**
+```json
+GET /ecommerce-microservices-*/_search
+{
+  "size": 0,
+  "aggs": {
+    "services": {
+      "terms": {
+        "field": "container.name.keyword",
+        "size": 10
+      }
+    }
+  }
+}
+```
+
+### Archivos de Configuración
+
+**Estructura de ELK:**
+```
+elk/
+├── filebeat/
+│   └── filebeat.yml        # Configuración de Filebeat
+└── logback-spring.xml      # Configuración de logging JSON (referencia)
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/elasticsearch.yaml` - StatefulSet, Service y ConfigMap de Elasticsearch
+- `k8s/filebeat.yaml` - DaemonSet, ConfigMap, ServiceAccount y RBAC de Filebeat
+
+## Tracing Distribuido con Zipkin
+
+### Stack de Tracing: Spring Cloud Sleuth + Zipkin
+
+El proyecto incluye un sistema completo de tracing distribuido implementado con:
+- **Spring Cloud Sleuth**: Instrumentación automática para rastrear solicitudes
+- **Zipkin**: Sistema de recopilación y visualización de traces
+- **Trace ID y Span ID**: Identificadores únicos propagados a través de todos los servicios
+
+### Funcionalidades Implementadas
+
+**1. Instrumentación Automática:**
+- Todos los microservicios están instrumentados con Spring Cloud Sleuth
+- Traces automáticos para:
+  - Solicitudes HTTP (Spring MVC, Spring WebFlux)
+  - Llamadas entre servicios (Feign Clients)
+  - Base de datos (JPA/Hibernate)
+  - Mensajería (Kafka - si está configurado)
+
+**2. Propagación de Traces:**
+- Trace ID único por solicitud
+- Span ID para cada operación dentro de un trace
+- Propagación automática a través de:
+  - Headers HTTP (`X-B3-TraceId`, `X-B3-SpanId`, etc.)
+  - Llamadas Feign entre servicios
+  - API Gateway a microservicios
+
+**3. Sampling Configurable:**
+- Probabilidad de sampling configurable por servicio
+- Valor por defecto: 1.0 (100% de las solicitudes se rastrean)
+- Configurable mediante variable de entorno: `SLEUTH_SAMPLER_PROBABILITY`
+
+### Ejecutar con Docker Compose
+
+**1. Levantar Zipkin:**
+```bash
+docker compose -f compose.yml up -d zipkin
+```
+
+**2. Verificar que esté corriendo:**
+```bash
+curl http://localhost:9411/health
+```
+
+**3. Generar tráfico y ver traces:**
+```bash
+
+curl http://localhost:8080/product-service/api/products
+
+```
+
+**4. Búsqueda de Traces en Zipkin UI:**
+- **Por servicio**: Selecciona un servicio específico
+- **Por tiempo**: Define rango de tiempo
+- **Por trace ID**: Si conoces el trace ID de los logs
+- **Por tag**: Busca por tags personalizados
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de Zipkin:**
+```bash
+kubectl apply -f k8s/zipkin.yaml
+
+kubectl get pods -n ecommerce | grep zipkin
+kubectl get svc -n ecommerce | grep zipkin
+```
+
+**2. Acceder a Zipkin:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n ecommerce svc/zipkin 9411:9411
+```
+
+O directamente via NodePort:
+- Zipkin: `http://<node-ip>:30411`
+
+**3. Verificar traces:**
+```bash
+
+kubectl port-forward -n ecommerce svc/api-gateway 8080:8080
+curl http://localhost:8080/product-service/api/products
+
+```
+
+### Configuración de Sampling
+
+**Ajustar sampling rate por servicio:**
+
+En `application.yml` o mediante variable de entorno:
+```yaml
+spring:
+  sleuth:
+    sampler:
+      probability: 0.5  
+```
+
+**Configurar mediante variable de entorno:**
+```bash
+
+SPRING_SLEUTH_SAMPLER_PROBABILITY=0.5
+
+
+env:
+  - name: SLEUTH_SAMPLER_PROBABILITY
+    value: "0.5"
+```
+
+**Recomendaciones de sampling:**
+- **Desarrollo**: 1.0 (100%) - Para ver todas las solicitudes
+- **Producción**: 0.1 - 0.5 (10-50%) - Balance entre visibilidad y overhead
+- **Servicios críticos**: 1.0 (100%) - Para diagnóstico completo
+
+### Visualización de Traces
+
+**1. Trace Timeline:**
+- Muestra la duración total de la solicitud
+- Visualiza todos los servicios involucrados
+- Indica el tiempo en cada servicio
+
+**2. Dependency Graph:**
+- Visualiza las dependencias entre servicios
+- Muestra la frecuencia de llamadas
+- Identifica cuellos de botella
+
+**3. Trace Details:**
+- Span individuales con:
+  - Timestamp de inicio y fin
+  - Duración exacta
+  - Tags y annotations
+  - Errores (si los hay)
+
+### Búsqueda y Filtrado
+
+**Búsqueda por:**
+- **Service Name**: Nombre del servicio (ej: `api-gateway`, `product-service`)
+- **Span Name**: Operación específica (ej: `GET /api/products`)
+- **Trace ID**: ID único del trace
+- **Duration**: Duración mínima/máxima
+- **Tags**: Tags personalizados
+- **Annotations**: Anotaciones en los spans
+
+**Ejemplo de búsqueda:**
+```
+Service Name: api-gateway
+Span Name: GET /product-service/api/products
+Min Duration: 100ms
+Max Duration: 5000ms
+```
+
+### Integración con Logs
+
+Los traces se integran automáticamente con los logs:
+
+**Formato de logs con Sleuth:**
+```
+[api-gateway,1234567890123456789,9876543210987654] INFO - Processing request
+```
+
+Donde:
+- `api-gateway` - Nombre del servicio
+- `1234567890123456789` - Trace ID
+- `9876543210987654` - Span ID
+
+**Buscar en logs por Trace ID:**
+```bash
+
+trace.id:1234567890123456789
+
+
+docker logs <container> | grep 1234567890123456789
+```
+
+### Configuración Avanzada
+
+**1. Tags Personalizados:**
+```java
+@Autowired
+private Tracer tracer;
+
+public void someMethod() {
+    Span span = tracer.currentSpan();
+    span.tag("custom.tag", "value");
+    span.tag("user.id", userId);
+}
+```
+
+**2. Annotations Personalizadas:**
+```java
+span.event("custom.event");
+span.tag("annotation", "something happened");
+```
+
+**3. Span Personalizado:**
+```java
+@NewSpan("custom-operation")
+public void customOperation() {
+    
+}
+```
+
+### Métricas de Zipkin en Prometheus
+
+Zipkin expone métricas que pueden ser scrapeadas por Prometheus:
+
+**Métricas disponibles:**
+- `zipkin_reporter_spans_total` - Total de spans reportados
+- `zipkin_reporter_spans_dropped_total` - Spans que fallaron al reportar
+- `zipkin_reporter_queue_spans` - Spans en cola para reportar
+
+**Configurar scraping en Prometheus:**
+```yaml
+scrape_configs:
+  - job_name: 'zipkin'
+    static_configs:
+      - targets: ['zipkin:9411']
+        labels:
+          service: 'zipkin'
+```
+
+### Persistencia de Traces
+
+**Configuración actual (Memoria):**
+- Traces almacenados en memoria
+- Se pierden al reiniciar Zipkin
+- Adecuado para desarrollo
+
+**Configurar persistencia con Elasticsearch:**
+
+1. Modificar `compose.yml`:
+```yaml
+zipkin:
+  environment:
+    - STORAGE_TYPE=elasticsearch
+    - ES_HOSTS=http://elasticsearch:9200
+```
+
+2. O en Kubernetes:
+```yaml
+env:
+  - name: STORAGE_TYPE
+    value: "elasticsearch"
+  - name: ES_HOSTS
+    value: "http://elasticsearch:9200"
+```
+
+### Troubleshooting
+
+**No aparecen traces en Zipkin:**
+1. Verifica que Zipkin esté corriendo: `curl http://localhost:9411/health`
+2. Verifica la URL de Zipkin en los servicios: `SPRING_ZIPKIN_BASE_URL`
+3. Verifica el sampling rate: `SLEUTH_SAMPLER_PROBABILITY`
+4. Revisa los logs del servicio para errores de conexión
+
+**Traces incompletos:**
+1. Verifica que todos los servicios tengan Sleuth configurado
+2. Verifica que los headers de trace se propaguen (X-B3-*)
+3. Revisa que Feign Clients tengan Sleuth habilitado
+
+**Alto overhead de performance:**
+1. Reduce el sampling rate: `SLEUTH_SAMPLER_PROBABILITY=0.1`
+2. Considera usar async reporting (configurar RabbitMQ/Kafka)
+
+### Archivos de Configuración
+
+**Dependencias (pom.xml):**
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-sleuth</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-sleuth-zipkin</artifactId>
+</dependency>
+```
+
+**Configuración en servicios (application.yml):**
+```yaml
+spring:
+  zipkin:
+    base-url: ${SPRING_ZIPKIN_BASE_URL:http://localhost:9411/}
+    sender:
+      type: web
+  sleuth:
+    sampler:
+      probability: ${SLEUTH_SAMPLER_PROBABILITY:1.0}
+    zipkin:
+      base-url: ${SPRING_ZIPKIN_BASE_URL:http://localhost:9411/}
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/zipkin.yaml` - Deployment, Service y ConfigMap de Zipkin
+
+### Ejemplos de Uso
+
+**1. Rastrear una solicitud completa:**
+```
+1. Cliente → API Gateway (Trace ID: abc123)
+2. API Gateway → Product Service (Trace ID: abc123)
+3. Product Service → Database (Trace ID: abc123)
+4. Product Service → User Service (Trace ID: abc123)
+```
+
+Todos los pasos aparecen en el mismo trace en Zipkin.
+
+**2. Identificar cuellos de botella:**
+- Ver duración de cada span
+- Identificar servicios lentos
+- Analizar dependencias problemáticas
+
+**3. Debugging de errores:**
+- Buscar traces con errores
+- Ver stack traces completos
+- Analizar el flujo completo de la solicitud
+
+## Alertas para Situaciones Críticas
+
+Esta sección describe cómo configurar y usar Prometheus Alertmanager para alertar sobre situaciones críticas en los microservicios.
+
+### Stack de Alertas: Prometheus + Alertmanager
+
+El proyecto incluye un sistema completo de alertas implementado con:
+- **Prometheus**: Evalúa reglas de alertas basadas en métricas
+- **Alertmanager**: Gestiona, agrupa y envía notificaciones de alertas
+- **Reglas de alertas**: Definidas para situaciones críticas, de infraestructura y de negocio
+
+### Reglas de Alertas Implementadas
+
+**Alertas Críticas de Microservicios:**
+
+1. **ServiceDown** (Crítica)
+   - **Condición**: Servicio no responde por más de 1 minuto
+   - **Severidad**: Critical
+   - **Acción**: Notificación inmediata
+
+2. **HighErrorRate** (Crítica)
+   - **Condición**: Más del 5% de errores 5xx en los últimos 5 minutos
+   - **Severidad**: Critical
+   - **Umbral**: 5% de tasa de error
+
+3. **HighLatency** (Advertencia)
+   - **Condición**: Latencia p99 > 1 segundo por más de 5 minutos
+   - **Severidad**: Warning
+   - **Umbral**: 1 segundo
+
+4. **CircuitBreakerOpen** (Crítica)
+   - **Condición**: Circuit breaker en estado OPEN por más de 2 minutos
+   - **Severidad**: Critical
+   - **Indica**: Servicio no disponible o con fallos constantes
+
+5. **CircuitBreakerHalfOpen** (Advertencia)
+   - **Condición**: Circuit breaker en estado HALF_OPEN por más de 5 minutos
+   - **Severidad**: Warning
+   - **Indica**: Servicio en proceso de recuperación
+
+6. **HighRetryRate** (Advertencia)
+   - **Condición**: Más del 30% de llamadas requieren retry
+   - **Severidad**: Warning
+   - **Umbral**: 30% de tasa de retry
+
+**Alertas de Infraestructura:**
+
+7. **HighJvmMemoryUsage** (Advertencia)
+   - **Condición**: Uso de memoria heap > 85% por más de 5 minutos
+   - **Severidad**: Warning
+   - **Umbral**: 85% de memoria
+
+8. **HighCpuUsage** (Advertencia)
+   - **Condición**: Uso de CPU > 80% por más de 5 minutos
+   - **Severidad**: Warning
+   - **Umbral**: 80% de CPU
+
+9. **HighGcPauseTime** (Advertencia)
+   - **Condición**: Tiempo de pausa GC > 0.1s/s por más de 5 minutos
+   - **Severidad**: Warning
+   - **Indica**: Problemas de rendimiento de JVM
+
+10. **PrometheusTargetDown** (Crítica)
+    - **Condición**: Prometheus no puede scrapear un target por más de 2 minutos
+    - **Severidad**: Critical
+    - **Indica**: Problema de monitoreo o servicio caído
+
+**Alertas de Negocio:**
+
+11. **NoHttpRequests** (Advertencia)
+    - **Condición**: Sin solicitudes HTTP en los últimos 10 minutos
+    - **Severidad**: Warning
+    - **Indica**: Posible problema de tráfico o servicio no accesible
+
+12. **LowSuccessRate** (Crítica)
+    - **Condición**: Tasa de éxito < 90% por más de 5 minutos
+    - **Severidad**: Critical
+    - **Umbral**: 90% de éxito
+
+### Ejecutar con Docker Compose
+
+**1. Levantar Alertmanager:**
+```bash
+docker compose -f compose.yml up -d alertmanager
+```
+
+**2. Verificar configuración:**
+```bash
+
+curl http://localhost:9093/api/v1/status
+
+curl http://localhost:9093/api/v1/alerts
+```
+
+**3. Acceso a Alertmanager:**
+- **Alertmanager UI**: http://localhost:9093
+  - Ver alertas activas
+  - Ver silencios (silences)
+  - Ver historial de alertas
+
+**4. Verificar reglas de alertas en Prometheus:**
+- **Prometheus Alerts**: http://localhost:9090/alerts
+  - Ver todas las reglas de alertas
+  - Ver estado de cada alerta (Pending/Firing)
+
+### Ejecutar en Kubernetes
+
+**1. Aplicar manifiestos de alertas:**
+```bash
+kubectl apply -f k8s/alertmanager.yaml
+
+kubectl get pods -n monitoring
+kubectl get svc -n monitoring
+```
+
+**2. Acceder a Alertmanager:**
+
+Usando port-forward:
+```bash
+kubectl port-forward -n monitoring svc/alertmanager 9093:9093
+```
+
+O directamente via NodePort:
+- Alertmanager: `http://<node-ip>:30093`
+
+**3. Verificar alertas:**
+```bash
+kubectl port-forward -n monitoring svc/alertmanager 9093:9093
+curl http://localhost:9093/api/v1/alerts
+```
+
+### Configuración de Notificaciones
+
+Alertmanager está configurado con receptores para diferentes tipos de alertas:
+
+**Receptores configurados:**
+- `default-receiver`: Alertas generales (webhook)
+- `critical-receiver`: Alertas críticas (webhook)
+- `infrastructure-receiver`: Alertas de infraestructura (webhook)
+- `business-receiver`: Alertas de negocio (webhook)
+
+**Configurar notificaciones por Slack:**
+
+```yaml
+receivers:
+  - name: 'critical-receiver'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+        channel: '#alerts'
+        title: 'Alerta Crítica'
+        text: '{{ .CommonAnnotations.description }}'
+```
+### Health Checks y Probes en Kubernetes
+
+Todos los microservicios están configurados con health checks:
+
+**Liveness Probe:**
+- **Propósito**: Determina si el contenedor está vivo
+- **Acción**: Si falla, Kubernetes reinicia el contenedor
+- **Configuración**: 
+  - Path: `/actuator/health` (o con context-path)
+  - Initial Delay: 60 segundos
+  - Period: 10 segundos
+  - Timeout: 5 segundos
+  - Failure Threshold: 3
+
+**Readiness Probe:**
+- **Propósito**: Determina si el contenedor está listo para recibir tráfico
+- **Acción**: Si falla, Kubernetes remueve el pod del Service
+- **Configuración**:
+  - Path: `/actuator/health` (o con context-path)
+  - Initial Delay: 30 segundos
+  - Period: 5 segundos
+  - Timeout: 3 segundos
+  - Failure Threshold: 3
+
+## Despliegue con Helm Charts
+
+Este proyecto incluye **Helm Charts** para cada servicio, permitiendo una gestión más flexible y parametrizable de los despliegues en Kubernetes.
+
+### ¿Qué es Helm?
+
+Helm es el **gestor de paquetes para Kubernetes**. Permite empaquetar aplicaciones Kubernetes como "charts" reutilizables, versionados y parametrizables.
+
+### Ventajas de usar Helm
+
+- **Parametrización**: Configuración diferente por ambiente (dev/stage/prod)
+- **Versionado**: Gestión de versiones de aplicaciones
+- **Reutilización**: Un mismo chart para múltiples ambientes
+- **Instalación simple**: Un comando instala/actualiza todo
+- **Rollbacks**: Revertir cambios fácilmente
+
+### Charts Disponibles
+
+El proyecto incluye Charts de Helm para todos los servicios:
+
+**Microservicios (7):**
+- `user-service`, `product-service`, `order-service`
+- `payment-service`, `shipping-service`, `favourite-service`
+- `proxy-client`
+
+**Infraestructura (4):**
+- `api-gateway`, `service-discovery`, `cloud-config`, `zipkin`
+
+**Monitoreo (3):**
+- `prometheus`, `grafana`, `alertmanager`
+
+**Logging (2):**
+- `elasticsearch`, `filebeat`
+
+Todos los Charts están en el directorio `helm/`.
+
+### Instalación de Helm
+
+**Windows:**
+```powershell
+# Usando Chocolatey
+choco install kubernetes-helm
+
+# O descargar desde: https://github.com/helm/helm/releases
+```
+
+**Linux/macOS:**
+```bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+### Uso Básico
+
+**Instalar un servicio:**
+```bash
+helm install user-service ./helm/user-service
+```
+
+**Instalar con valores personalizados:**
+```bash
+helm install user-service ./helm/user-service \
+  --set replicaCount=3 \
+  --set image.tag=0.2.0
+```
+
+**Actualizar un servicio:**
+```bash
+helm upgrade user-service ./helm/user-service \
+  --set replicaCount=5
+```
+
+**Ver releases instaladas:**
+```bash
+helm list
+helm list -A  # Todos los namespaces
+```
+
+**Desinstalar:**
+```bash
+helm uninstall user-service
+```
+
+**Rollback:**
+```bash
+helm rollback user-service 1  
+```
+
+### Desplegar Todo el Stack
+
+**Orden de despliegue recomendado:**
+
+```bash
+# 1. Infraestructura base
+helm install service-discovery ./helm/service-discovery
+helm install cloud-config ./helm/cloud-config
+helm install zipkin ./helm/zipkin
+
+# 2. Microservicios
+helm install user-service ./helm/user-service
+helm install product-service ./helm/product-service
+helm install order-service ./helm/order-service
+helm install payment-service ./helm/payment-service
+helm install shipping-service ./helm/shipping-service
+helm install favourite-service ./helm/favourite-service
+helm install proxy-client ./helm/proxy-client
+
+# 3. API Gateway (debe ir al final)
+helm install api-gateway ./helm/api-gateway
+
+# 4. Monitoreo
+helm install prometheus ./helm/prometheus
+helm install grafana ./helm/grafana
+helm install alertmanager ./helm/alertmanager
+
+# 5. Logging
+helm install elasticsearch ./helm/elasticsearch
+helm install filebeat ./helm/filebeat
+```
+
+### Valores Personalizables
+
+Cada Chart tiene un archivo `values.yaml` con valores por defecto. Los más comunes:
+
+- `replicaCount`: Número de réplicas
+- `image.repository`: Repositorio de la imagen
+- `image.tag`: Tag de la imagen
+- `service.type`: Tipo de servicio (ClusterIP, NodePort, LoadBalancer)
+- `service.port`: Puerto del servicio
+- `namespace`: Namespace donde se desplegará
+- `resources`: Límites de recursos (CPU, memoria)
+
+**Ejemplo: Instalar con valores personalizados:**
+```bash
+helm install user-service ./helm/user-service \
+  --set replicaCount=3 \
+  --set image.tag=0.2.0 \
+  --set service.nodePort=30700 \
+  --set resources.requests.memory=512Mi \
+  --set resources.limits.memory=1Gi
+```
+
+### Multi-Ambiente
+
+**Crear archivo de valores para producción:**
+```yaml
+# helm/user-service/values-prod.yaml
+replicaCount: 3
+image:
+  tag: "0.2.0"
+service:
+  type: LoadBalancer
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+```
+
+**Instalar con valores de producción:**
+```bash
+helm install user-service ./helm/user-service \
+  -f helm/user-service/values-prod.yaml \
+  --namespace production
+```
+
+**Ejemplo de configuración en Kubernetes:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /product-service/actuator/health
+    port: 8500
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /product-service/actuator/health
+    port: 8500
+  initialDelaySeconds: 30
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+```
+
+### Gestión de Alertas
+
+**Ver alertas activas:**
+```bash
+curl http://localhost:9093/api/v1/alerts
+
+```
+### Inhibiciones de Alertas
+
+Las inhibiciones evitan alertas duplicadas o relacionadas:
+
+**Configuradas:**
+- Si `ServiceDown` está activa, no alertar sobre `HighLatency` del mismo servicio
+- Si `ServiceDown` está activa, no alertar sobre `HighErrorRate` del mismo servicio
+
+**Lógica**: Si un servicio está caído, no tiene sentido alertar sobre latencia o errores.
+
+### Archivos de Configuración
+
+**Estructura de alertas:**
+```
+monitoring/
+├── prometheus/
+│   ├── prometheus.yml    # Configuración de Prometheus (incluye alertmanager)
+│   └── alerts.yml       # Reglas de alertas
+└── alertmanager/
+    └── alertmanager.yml # Configuración de Alertmanager y notificaciones
+```
+
+**Manifiestos Kubernetes:**
+- `k8s/prometheus.yaml` - ConfigMap con reglas de alertas
+- `k8s/alertmanager.yaml` - Deployment, Service y ConfigMap de Alertmanager
+
+### Personalizar Reglas de Alertas
+
+Para modificar umbrales o agregar nuevas alertas:
+
+1. Edita `monitoring/prometheus/alerts.yml`
+2. Reinicia Prometheus:
+   ```bash
+   # Docker Compose
+   docker compose -f compose.yml restart prometheus
+   
+   # Kubernetes - recarga configuración
+   curl -X POST http://localhost:9090/-/reload
+   ```
+
+**Ejemplo de nueva regla:**
+```yaml
+- alert: CustomAlert
+  expr: your_promql_query > threshold
+  for: 5m
+  labels:
+    severity: warning
+    component: custom
+  annotations:
+    summary: "Resumen de la alerta"
+    description: "Descripción detallada: {{ $value }}"
+```

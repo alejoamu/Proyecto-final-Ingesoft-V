@@ -1,0 +1,13 @@
+apiVersion: v2
+name: filebeat
+description: A Helm chart for Filebeat log shipper
+type: application
+version: 0.1.0
+appVersion: "8.11.0"
+keywords:
+  - logging
+  - filebeat
+  - elk
+maintainers:
+  - name: Ecommerce Team
+

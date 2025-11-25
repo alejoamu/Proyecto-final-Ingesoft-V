@@ -8,14 +8,27 @@ spec:
   selector:
     matchLabels:
       app: proxy-client
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
   template:
     metadata:
       labels:
         app: proxy-client
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: proxy-client
           image: selimhorri/proxy-client-ecommerce-boot:0.1.0
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
           ports:
             - containerPort: 8900
           env:
@@ -57,6 +70,22 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+          livenessProbe:
+            httpGet:
+              path: /app/actuator/health
+              port: 8900
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /app/actuator/health
+              port: 8900
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service

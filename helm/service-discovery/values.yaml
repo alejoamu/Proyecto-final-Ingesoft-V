@@ -1,0 +1,42 @@
+replicaCount: 1
+
+image:
+  repository: selimhorri/service-discovery-ecommerce-boot
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8761
+  targetPort: 8761
+
+namespace: ecommerce
+
+probes:
+  liveness:
+    path: /actuator/health
+    port: 8761
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /actuator/health
+    port: 8761
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources: {}
+
+env:
+  springProfilesActive: dev
+  springZipkinBaseUrl: http://zipkin:9411
+  springCloudConfigEnabled: "false"
+  eurekaClientRegisterWithEureka: "false"
+  eurekaClientFetchRegistry: "false"
+  eurekaInstancePreferIpAddress: "true"

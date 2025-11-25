@@ -1,0 +1,40 @@
+replicaCount: 1
+
+image:
+  repository: selimhorri/cloud-config-ecommerce-boot
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 9296
+  targetPort: 9296
+
+namespace: ecommerce
+
+probes:
+  liveness:
+    path: /actuator/health
+    port: 9296
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /actuator/health
+    port: 9296
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources: {}
+
+env:
+  springProfilesActive: dev
+  springZipkinBaseUrl: http://zipkin:9411
+  eurekaClientServiceUrlDefaultZone: http://service-discovery:8761/eureka/
+  springCloudConfigServerGitCloneOnStart: "false"

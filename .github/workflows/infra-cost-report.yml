@@ -1,0 +1,80 @@
+name: Infra Cost Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Entorno a estimar (dev/stage/prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+
+jobs:
+  estimate-cost:
+    name: Generate Infra Cost Report
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Select environment directory
+        id: envdir
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            dev)
+              echo "dir=environments/dev" >> $GITHUB_OUTPUT
+              ;;
+            stage)
+              echo "dir=environments/stage" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "dir=environments/prod" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Terraform Init (plan only, no apply)
+        run: |
+          cd ${{ steps.envdir.outputs.dir }}
+          terraform init -input=false
+
+      - name: Terraform Plan (JSON)
+        id: plan
+        run: |
+          cd ${{ steps.envdir.outputs.dir }}
+          terraform plan -input=false -lock=false -out=tfplan
+          terraform show -json tfplan > tfplan.json
+
+      - name: Generate human-readable cost report
+        id: cost
+        run: |
+          cd ${{ steps.envdir.outputs.dir }}
+          echo "Infra Cost Report for environment: ${{ github.event.inputs.environment }}" > infra-cost-report.txt
+          echo "" >> infra-cost-report.txt
+          echo "Este reporte NO es un cálculo real de precios de Azure; solo lista recursos estimados desde Terraform plan." >> infra-cost-report.txt
+          echo "" >> infra-cost-report.txt
+          echo "Recursos previstos en tfplan.json:" >> infra-cost-report.txt
+          jq -r '.resource_changes[] | "- " + .type + "." + .name + " (" + (.change.actions|join(",")) + ")"' tfplan.json >> infra-cost-report.txt
+
+      - name: Upload cost report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-cost-report-${{ github.event.inputs.environment }}
+          path: infra/${{ steps.envdir.outputs.dir }}/infra-cost-report.txt
+
+      - name: Show report in logs
+        run: |
+          cd ${{ steps.envdir.outputs.dir }}
+          echo "========== Infra Cost Report =========="
+          cat infra-cost-report.txt

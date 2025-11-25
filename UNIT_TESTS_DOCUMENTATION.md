@@ -1,10 +1,10 @@
-# 📋 Documentación de Tests Unitarios - Microservicios E-commerce
+#  Documentación de Tests Unitarios - Microservicios E-commerce
 
 Este documento explica qué está probando cada test unitario en cada microservicio del sistema e-commerce.
 
 ---
 
-## 📦 Product Service (`product-service`)
+##  Product Service (`product-service`)
 
 ### Tests Unitarios (`ProductServiceTest.java`)
 
@@ -35,7 +35,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 👤 User Service (`user-service`)
+## User Service (`user-service`)
 
 ### Tests Unitarios (`UserServiceTest.java`)
 
@@ -66,7 +66,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 💳 Payment Service (`payment-service`)
+## Payment Service (`payment-service`)
 
 ### Tests Unitarios (`PaymentServiceTest.java`)
 
@@ -97,7 +97,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 📋 Order Service (`order-service`)
+## Order Service (`order-service`)
 
 ### Tests Unitarios (`OrderServiceTest.java`)
 
@@ -128,7 +128,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 🚚 Shipping Service (`shipping-service`)
+## Shipping Service (`shipping-service`)
 
 ### Tests Unitarios (`ShippingServiceTest.java`)
 
@@ -159,7 +159,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## ❤️ Favourite Service (`favourite-service`)
+## Favourite Service (`favourite-service`)
 
 ### Tests Unitarios (`FavouriteServiceTest.java`)
 
@@ -190,7 +190,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 🌐 API Gateway (`api-gateway`)
+## API Gateway (`api-gateway`)
 
 ### Tests Unitarios (`ApiGatewayTest.java`)
 
@@ -221,7 +221,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## ☁️ Cloud Config Service (`cloud-config`)
+## Cloud Config Service (`cloud-config`)
 
 ### Tests Unitarios (`CloudConfigTest.java`)
 
@@ -252,7 +252,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 🔍 Service Discovery (`service-discovery`)
+## Service Discovery (`service-discovery`)
 
 ### Tests Unitarios (`ServiceDiscoveryTest.java`)
 
@@ -283,7 +283,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 🔗 Proxy Client (`proxy-client`)
+## Proxy Client (`proxy-client`)
 
 ### Tests Unitarios (`SimpleTest.java`)
 
@@ -314,7 +314,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-## 📊 Resumen General
+## Resumen General
 
 ### Características Comunes de los Tests Unitarios
 
@@ -335,7 +335,7 @@ Este documento explica qué está probando cada test unitario en cada microservi
 
 ---
 
-**Última actualización**: 2025-01-XX
+**Última actualización**: 2025-11-23
 
 
 

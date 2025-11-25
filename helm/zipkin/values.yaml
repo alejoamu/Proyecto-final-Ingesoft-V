@@ -1,0 +1,39 @@
+replicaCount: 1
+
+image:
+  repository: openzipkin/zipkin
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: NodePort
+  port: 9411
+  targetPort: 9411
+  nodePort: 30411
+
+namespace: ecommerce
+
+probes:
+  liveness:
+    path: /health
+    port: 9411
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /health
+    port: 9411
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources: {}
+
+env:
+  storageType: mem
+  javaOpts: "-Xms256m -Xmx512m"

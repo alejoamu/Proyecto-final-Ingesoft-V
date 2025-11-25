@@ -1,0 +1,12 @@
+apiVersion: v2
+name: proxy-client
+description: A Helm chart for Proxy Client microservice
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - microservice
+  - proxy-client
+  - ecommerce
+maintainers:
+  - name: Ecommerce Team

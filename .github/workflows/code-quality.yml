@@ -1,0 +1,101 @@
+name: Code Quality & Security
+
+on:
+  pull_request:
+    paths:
+      - '**/*.java'
+      - 'pom.xml'
+      - '.github/workflows/code-quality.yml'
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-test-sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Build & Test
+        run: ./mvnw -B clean verify -DskipTests=false -DfailIfNoTests=false
+
+      - name: SonarQube Scan
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: ./mvnw -B sonar:sonar -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-test-sonar
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Run OWASP Dependency-Check
+        continue-on-error: true
+        run: |
+          echo "Running OWASP Dependency-Check for Maven dependencies..."
+          ./mvnw -B org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=7.0 \
+            -DautoUpdate=true \
+            -Dformat=HTML \
+            -Dformat=JSON \
+            -Dformat=XML
+        env:
+          JAVA_OPTS: "-Xmx2048m"
+
+      - name: Upload OWASP Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owasp-dependency-check-reports
+          path: |
+            **/target/dependency-check-report.html
+            **/target/dependency-check-report.json
+            **/target/dependency-check-report.xml
+          retention-days: 30
+
+      - name: Install Trivy
+        uses: aquasecurity/trivy-action@0.13.0
+        with:
+          skip-db-update: false
+          format: table
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '0'
+          scan-type: 'fs'
+          vuln-type: 'os,library'
+
+      - name: Fail on HIGH/CRITICAL (filesystem)
+        run: trivy fs --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
+
+      - name: Build images matrix
+        run: |
+          for dir in api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service cloud-config service-discovery; do
+            if [ -f "$dir/Dockerfile" ]; then
+              docker build -q -t "$dir:ci-scan" "$dir"
+            fi
+          done
+
+      - name: Image scans (fail on HIGH/CRITICAL)
+        run: |
+          for img in api-gateway proxy-client user-service product-service favourite-service order-service shipping-service payment-service cloud-config service-discovery; do
+            if docker image inspect "$img:ci-scan" > /dev/null 2>&1; then
+              trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$img:ci-scan" || exit 1
+            fi
+          done
+

@@ -8,14 +8,27 @@ spec:
   selector:
     matchLabels:
       app: favourite-service
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
   template:
     metadata:
       labels:
         app: favourite-service
     spec:
+      serviceAccountName: microservice-sa
       containers:
         - name: favourite-service
           image: selimhorri/favourite-service-ecommerce-boot:0.1.0
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
           ports:
             - containerPort: 8800
           env:
@@ -60,6 +73,22 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+          livenessProbe:
+            httpGet:
+              path: /favourite-service/actuator/health
+              port: 8800
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /favourite-service/actuator/health
+              port: 8800
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
