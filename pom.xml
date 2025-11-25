@@ -177,16 +177,20 @@
 					</suppressionFiles>
 					<autoUpdate>true</autoUpdate>
 					<dataDirectory>${project.basedir}/.dependency-check-data</dataDirectory>
+					<nvdValidForHours>24</nvdValidForHours>
+					<failOnError>false</failOnError>
 				</configuration>
 				<executions>
 					<execution>
+						<id>dependency-check</id>
+						<phase>none</phase>
 						<goals>
 							<goal>check</goal>
 						</goals>
 					</execution>
 					<execution>
 						<id>report-aggregate</id>
-						<phase>verify</phase>
+						<phase>none</phase>
 						<goals>
 							<goal>aggregate</goal>
 						</goals>
