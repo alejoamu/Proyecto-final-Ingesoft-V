@@ -22,6 +22,7 @@ on:
 permissions:
   contents: read
   security-events: write
+  checks: write
 
 env:
   JAVA_VERSION: '11'
