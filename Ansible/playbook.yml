@@ -331,6 +331,62 @@
         mode: '0755'
       when: locust_dir.stat.exists | default(false)
 
+    # ===== Copiar configuraciones de monitoreo =====
+    - name: Crear directorios para configuraciones de monitoreo
+      file:
+        path: "/home/{{ ansible_user }}/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - monitoring/prometheus
+        - monitoring/alertmanager
+        - monitoring/grafana/provisioning/datasources
+        - monitoring/grafana/provisioning/dashboards
+        - monitoring/grafana/dashboards
+        - elk/filebeat
+
+    - name: Copiar configuración de Prometheus
+      copy:
+        src: "{{ playbook_dir }}/monitoring/prometheus/prometheus.yml"
+        dest: "/home/{{ ansible_user }}/monitoring/prometheus/prometheus.yml"
+        mode: '0644'
+
+    - name: Copiar reglas de alertas de Prometheus
+      copy:
+        src: "{{ playbook_dir }}/monitoring/prometheus/alerts.yml"
+        dest: "/home/{{ ansible_user }}/monitoring/prometheus/alerts.yml"
+        mode: '0644'
+
+    - name: Copiar configuración de Alertmanager
+      copy:
+        src: "{{ playbook_dir }}/../monitoring/alertmanager/alertmanager.yml"
+        dest: "/home/{{ ansible_user }}/monitoring/alertmanager/alertmanager.yml"
+        mode: '0644'
+
+    - name: Copiar configuración de datasource de Grafana
+      copy:
+        src: "{{ playbook_dir }}/../monitoring/grafana/provisioning/datasources/prometheus.yml"
+        dest: "/home/{{ ansible_user }}/monitoring/grafana/provisioning/datasources/prometheus.yml"
+        mode: '0644'
+
+    - name: Copiar configuración de dashboards de Grafana
+      copy:
+        src: "{{ playbook_dir }}/../monitoring/grafana/provisioning/dashboards/dashboard.yml"
+        dest: "/home/{{ ansible_user }}/monitoring/grafana/provisioning/dashboards/dashboard.yml"
+        mode: '0644'
+
+    - name: Copiar dashboards de Grafana
+      copy:
+        src: "{{ playbook_dir }}/../monitoring/grafana/dashboards/"
+        dest: "/home/{{ ansible_user }}/monitoring/grafana/dashboards/"
+        mode: '0644'
+
+    - name: Copiar configuración de Filebeat
+      copy:
+        src: "{{ playbook_dir }}/../elk/filebeat/filebeat.yml"
+        dest: "/home/{{ ansible_user }}/elk/filebeat/filebeat.yml"
+        mode: '0644'
+
     # Asegurar que SonarQube use el contexto /sonar creando/forzando sonar.properties en el volumen de conf
     - name: Establecer sonar.web.context en el volumen sonarqube_conf
       shell: |
@@ -485,6 +541,69 @@
       register: locust_debug
       changed_when: false
       failed_when: false
+
+    # ===== Herramientas de Monitoreo =====
+    - name: Levantar Elasticsearch
+      become: false
+      command: docker compose up -d --force-recreate elasticsearch
+      args:
+        chdir: /home/{{ ansible_user }}/
+
+    - name: Esperar a que Elasticsearch esté healthy
+      become: false
+      shell: docker inspect --format='{{"{{"}} .State.Health.Status {{"}}"}}' elasticsearch
+      register: es_health
+      retries: 30
+      delay: 10
+      until: es_health.stdout.strip() == 'healthy'
+      changed_when: false
+      ignore_errors: true
+
+    - name: Levantar Prometheus
+      become: false
+      command: docker compose up -d --force-recreate prometheus
+      args:
+        chdir: /home/{{ ansible_user }}/
+
+    - name: Esperar a que Prometheus esté listo
+      become: false
+      shell: |
+        curl -sS -f http://localhost:9090/-/healthy || exit 1
+      register: prometheus_ready
+      retries: 15
+      delay: 5
+      until: prometheus_ready.rc == 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: Levantar Alertmanager
+      become: false
+      command: docker compose up -d --force-recreate alertmanager
+      args:
+        chdir: /home/{{ ansible_user }}/
+
+    - name: Levantar Grafana
+      become: false
+      command: docker compose up -d --force-recreate grafana
+      args:
+        chdir: /home/{{ ansible_user }}/
+
+    - name: Esperar a que Grafana esté listo
+      become: false
+      shell: |
+        curl -sS -f http://localhost:3000/api/health || exit 1
+      register: grafana_ready
+      retries: 15
+      delay: 5
+      until: grafana_ready.rc == 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: Levantar Filebeat
+      become: false
+      command: docker compose up -d --force-recreate filebeat
+      args:
+        chdir: /home/{{ ansible_user }}/
 
     - name: Levantar Nginx (compose)
       become: false
