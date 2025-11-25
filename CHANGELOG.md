@@ -1,3 +1,9 @@
+## [1.0.3](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.2...v1.0.3) (2025-11-25)
+
+### Bug Fixes
+
+* Refactor payment status metrics recording ([82b1a28](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/82b1a28c88373c84f58cc810e73f3b6baa073ec2))
+
 ## [1.0.2](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.1...v1.0.2) (2025-11-25)
 
 ### Bug Fixes
