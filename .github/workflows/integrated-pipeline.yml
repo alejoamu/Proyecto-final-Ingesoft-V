@@ -435,10 +435,8 @@ jobs:
           # Crear namespace primero
           kubectl get ns ecommerce || kubectl create ns ecommerce
           
-          echo "=== Step 1: Applying core services (Zipkin, Service Discovery, Config Server) ==="
-          kubectl -n ecommerce apply -f k8s/zipkin.yaml || true
+          echo "=== Step 1: Applying Service Discovery (Eureka) first ==="
           kubectl -n ecommerce apply -f k8s/service-discovery.yaml
-          kubectl -n ecommerce apply -f k8s/cloud-config.yaml
           
           echo "=== Step 2: Waiting for Service Discovery (Eureka) to be ready ==="
           kubectl -n ecommerce wait --for=condition=available --timeout=180s deployment/service-discovery || {
@@ -466,7 +464,10 @@ jobs:
             echo "⚠️  Eureka may not be fully ready, but continuing..."
           fi
           
-          echo "=== Step 3: Waiting for Config Server to be ready ==="
+          echo "=== Step 3: Applying Cloud Config ==="
+          kubectl -n ecommerce apply -f k8s/cloud-config.yaml
+          
+          echo "=== Step 4: Waiting for Config Server to be ready ==="
           kubectl -n ecommerce wait --for=condition=available --timeout=180s deployment/cloud-config || {
             echo "⚠️  Config Server not ready, checking logs..."
             kubectl -n ecommerce logs -l app=cloud-config --tail=50 || true
@@ -492,10 +493,9 @@ jobs:
             echo "⚠️  Config Server may not be fully ready, but continuing..."
           fi
           
-          echo "=== Step 4: Applying Order Service first ==="
           kubectl -n ecommerce apply -f k8s/order-service.yaml
           
-          echo "=== Step 5: Waiting for Order Service to be ready ==="
+          echo "=== Step 6: Waiting for Order Service to be ready ==="
           kubectl -n ecommerce wait --for=condition=available --timeout=240s deployment/order-service || {
             echo "⚠️  Order Service not ready, checking logs..."
             kubectl -n ecommerce logs -l app=order-service --tail=50 || true
@@ -521,10 +521,10 @@ jobs:
             echo "⚠️  Order Service may not be fully ready, but continuing..."
           fi
           
-          echo "=== Step 6: Applying Product Service ==="
+          echo "=== Step 7: Applying Product Service ==="
           kubectl -n ecommerce apply -f k8s/product-service.yaml
           
-          echo "=== Step 7: Waiting for Product Service to be ready ==="
+          echo "=== Step 8: Waiting for Product Service to be ready ==="
           kubectl -n ecommerce wait --for=condition=available --timeout=240s deployment/product-service || {
             echo "⚠️  Product Service not ready, checking logs..."
             kubectl -n ecommerce logs -l app=product-service --tail=50 || true
@@ -550,7 +550,10 @@ jobs:
             echo "⚠️  Product Service may not be fully ready, but continuing..."
           fi
           
-          echo "=== Step 8: Applying remaining services ==="
+          echo "=== Step 9: Applying Zipkin (after Order and Product services) ==="
+          kubectl -n ecommerce apply -f k8s/zipkin.yaml || true
+          
+          echo "=== Step 10: Applying remaining services ==="
           kubectl -n ecommerce apply -f k8s/user-service.yaml
           kubectl -n ecommerce apply -f k8s/payment-service.yaml
           kubectl -n ecommerce apply -f k8s/shipping-service.yaml
