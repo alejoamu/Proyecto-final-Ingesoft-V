@@ -1,3 +1,9 @@
+## [1.0.8](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.7...v1.0.8) (2025-11-26)
+
+### Bug Fixes
+
+* Enhance CI pipeline with robust image handling and diagnostics ([68fdeee](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/68fdeee73443e9c175a7068ed98c661ee92149b9))
+
 ## [1.0.7](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.6...v1.0.7) (2025-11-26)
 
 ### Bug Fixes
