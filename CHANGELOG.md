@@ -1,3 +1,10 @@
+## [1.0.12](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.11...v1.0.12) (2025-11-26)
+
+### Bug Fixes
+
+* Improve SonarQube and deployment readiness scripts ([c3e19ac](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/c3e19acbf7ac632368d6927b8233b54984010fca))
+* Improve SonarQube workflow and update project properties ([f09a44d](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/f09a44d274965e0654da32be2326ff85c00e27e3))
+
 ## [1.0.11](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.10...v1.0.11) (2025-11-26)
 
 ### Bug Fixes
