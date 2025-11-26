@@ -429,10 +429,136 @@ jobs:
           echo "Verifying image replacements..."
           grep -A 1 "image:.*service" k8s/*.yaml | head -10 || true
 
-      - name: Apply Kubernetes manifests
+      - name: Apply Kubernetes manifests in correct order
         run: |
-          kubectl apply -k k8s
+          set -e
+          # Crear namespace primero
           kubectl get ns ecommerce || kubectl create ns ecommerce
+          
+          echo "=== Step 1: Applying core services (Zipkin, Service Discovery, Config Server) ==="
+          kubectl -n ecommerce apply -f k8s/zipkin.yaml || true
+          kubectl -n ecommerce apply -f k8s/service-discovery.yaml
+          kubectl -n ecommerce apply -f k8s/cloud-config.yaml
+          
+          echo "=== Step 2: Waiting for Service Discovery (Eureka) to be ready ==="
+          kubectl -n ecommerce wait --for=condition=available --timeout=180s deployment/service-discovery || {
+            echo "⚠️  Service Discovery not ready, checking logs..."
+            kubectl -n ecommerce logs -l app=service-discovery --tail=50 || true
+          }
+          
+          # Verificar que Eureka está realmente listo (no solo el deployment)
+          echo "Waiting for Eureka to finish initializing..."
+          EUREKA_READY=false
+          for i in $(seq 1 60); do
+            POD_NAME=$(kubectl -n ecommerce get pod -l app=service-discovery -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$POD_NAME" ]; then
+              if kubectl -n ecommerce logs "$POD_NAME" --tail=100 2>/dev/null | grep -qE "Finished initializing remote region registries|Started"; then
+                echo "✓ Eureka is ready"
+                EUREKA_READY=true
+                break
+              fi
+            fi
+            if [ $i -lt 60 ]; then
+              sleep 3
+            fi
+          done
+          if [ "$EUREKA_READY" = "false" ]; then
+            echo "⚠️  Eureka may not be fully ready, but continuing..."
+          fi
+          
+          echo "=== Step 3: Waiting for Config Server to be ready ==="
+          kubectl -n ecommerce wait --for=condition=available --timeout=180s deployment/cloud-config || {
+            echo "⚠️  Config Server not ready, checking logs..."
+            kubectl -n ecommerce logs -l app=cloud-config --tail=50 || true
+          }
+          
+          # Verificar que Config Server está realmente listo
+          echo "Waiting for Config Server to finish initializing..."
+          CONFIG_READY=false
+          for i in $(seq 1 60); do
+            POD_NAME=$(kubectl -n ecommerce get pod -l app=cloud-config -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$POD_NAME" ]; then
+              if kubectl -n ecommerce logs "$POD_NAME" --tail=100 2>/dev/null | grep -qE "Tomcat started on port\\(s\\): 9296|Started"; then
+                echo "✓ Config Server is ready"
+                CONFIG_READY=true
+                break
+              fi
+            fi
+            if [ $i -lt 60 ]; then
+              sleep 3
+            fi
+          done
+          if [ "$CONFIG_READY" = "false" ]; then
+            echo "⚠️  Config Server may not be fully ready, but continuing..."
+          fi
+          
+          echo "=== Step 4: Applying Order Service first ==="
+          kubectl -n ecommerce apply -f k8s/order-service.yaml
+          
+          echo "=== Step 5: Waiting for Order Service to be ready ==="
+          kubectl -n ecommerce wait --for=condition=available --timeout=240s deployment/order-service || {
+            echo "⚠️  Order Service not ready, checking logs..."
+            kubectl -n ecommerce logs -l app=order-service --tail=50 || true
+          }
+          
+          # Verificar que Order Service está realmente listo
+          echo "Waiting for Order Service to finish initializing..."
+          ORDER_READY=false
+          for i in $(seq 1 60); do
+            POD_NAME=$(kubectl -n ecommerce get pod -l app=order-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$POD_NAME" ]; then
+              if kubectl -n ecommerce logs "$POD_NAME" --tail=100 2>/dev/null | grep -qE "Tomcat started on port\\(s\\): 8300|Started"; then
+                echo "✓ Order Service is ready"
+                ORDER_READY=true
+                break
+              fi
+            fi
+            if [ $i -lt 60 ]; then
+              sleep 3
+            fi
+          done
+          if [ "$ORDER_READY" = "false" ]; then
+            echo "⚠️  Order Service may not be fully ready, but continuing..."
+          fi
+          
+          echo "=== Step 6: Applying Product Service ==="
+          kubectl -n ecommerce apply -f k8s/product-service.yaml
+          
+          echo "=== Step 7: Waiting for Product Service to be ready ==="
+          kubectl -n ecommerce wait --for=condition=available --timeout=240s deployment/product-service || {
+            echo "⚠️  Product Service not ready, checking logs..."
+            kubectl -n ecommerce logs -l app=product-service --tail=50 || true
+          }
+          
+          # Verificar que Product Service está realmente listo
+          echo "Waiting for Product Service to finish initializing..."
+          PRODUCT_READY=false
+          for i in $(seq 1 60); do
+            POD_NAME=$(kubectl -n ecommerce get pod -l app=product-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$POD_NAME" ]; then
+              if kubectl -n ecommerce logs "$POD_NAME" --tail=100 2>/dev/null | grep -qE "Tomcat started on port\\(s\\): 8500|Started"; then
+                echo "✓ Product Service is ready"
+                PRODUCT_READY=true
+                break
+              fi
+            fi
+            if [ $i -lt 60 ]; then
+              sleep 3
+            fi
+          done
+          if [ "$PRODUCT_READY" = "false" ]; then
+            echo "⚠️  Product Service may not be fully ready, but continuing..."
+          fi
+          
+          echo "=== Step 8: Applying remaining services ==="
+          kubectl -n ecommerce apply -f k8s/user-service.yaml
+          kubectl -n ecommerce apply -f k8s/payment-service.yaml
+          kubectl -n ecommerce apply -f k8s/shipping-service.yaml
+          kubectl -n ecommerce apply -f k8s/favourite-service.yaml
+          kubectl -n ecommerce apply -f k8s/api-gateway.yaml || true
+          kubectl -n ecommerce apply -f k8s/proxy-client.yaml || true
+          
+          echo "✓ All manifests applied in correct order"
 
       - name: Check pod status and diagnose issues
         run: |

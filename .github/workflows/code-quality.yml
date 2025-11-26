@@ -34,46 +34,70 @@ jobs:
 
       - name: Build and analyze
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
         run: |
+          # Verificar que el token esté configurado
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "ERROR: SONAR_TOKEN secret is not set in GitHub Secrets"
+            echo "Please configure it in: Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          
           # Obtener el projectKey del sonar-project.properties o usar el default
           if [ -f sonar-project.properties ]; then
             PROJECT_KEY=$(grep "^sonar.projectKey=" sonar-project.properties | cut -d'=' -f2 | tail -1 || echo "alejoamu_Proyecto-final-Ingesoft-V")
+            SONAR_ORG=$(grep "^sonar.organization=" sonar-project.properties | cut -d'=' -f2 | tail -1 || echo "alejoamu")
           else
             PROJECT_KEY="alejoamu_Proyecto-final-Ingesoft-V"
+            SONAR_ORG="alejoamu"
           fi
           
-          echo "Using SonarQube project key: $PROJECT_KEY"
-          echo "Organization: ${{ secrets.SONAR_ORGANIZATION }}"
+          echo "=== SonarCloud Configuration ==="
+          echo "Project Key: $PROJECT_KEY"
+          echo "Organization: $SONAR_ORG"
           echo "Branch: ${{ github.ref_name }}"
           echo "Commit SHA: ${{ github.sha }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Token configured: $([ -n "$SONAR_TOKEN" ] && echo "Yes" || echo "No")"
+          echo ""
           
-          # Ejecutar build, tests y análisis de SonarQube en un solo comando
-          # Este es el formato recomendado por SonarCloud
-          echo "Running build, tests and SonarQube analysis..."
-          ./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+          # Ejecutar build, tests y análisis de SonarQube
+          # Formato exacto recomendado por SonarCloud para Maven
+          echo "=== Running Maven build, tests and SonarCloud analysis ==="
+          ./mvnw clean verify sonar:sonar \
             -Dsonar.projectKey=$PROJECT_KEY \
-            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
+            -Dsonar.organization=$SONAR_ORG \
+            -Dsonar.host.url=https://sonarcloud.io \
             -DskipTests=false \
-            -DfailIfNoTests=false || {
-              echo "ERROR: Build, test or SonarQube analysis failed"
+            -DfailIfNoTests=false \
+            -X || {
+              echo ""
+              echo "=== ERROR: Build, test or SonarCloud analysis failed ==="
               echo "Please check:"
               echo "  1. SONAR_TOKEN is valid and set in GitHub Secrets"
-              echo "  2. SONAR_ORGANIZATION is correct: ${{ secrets.SONAR_ORGANIZATION }}"
+              echo "  2. SONAR_ORGANIZATION is correct: $SONAR_ORG"
               echo "  3. Project key '$PROJECT_KEY' exists in SonarCloud"
-              echo "  4. Build and tests completed successfully"
+              echo "  4. Token has permissions to analyze this project"
+              echo "  5. Build and tests completed successfully"
+              echo ""
+              echo "To verify your SonarCloud setup:"
+              echo "  - Go to https://sonarcloud.io/projects"
+              echo "  - Check if project '$PROJECT_KEY' exists"
+              echo "  - Verify token permissions in SonarCloud > My Account > Security"
               exit 1
             }
           
-          echo "✓ Build, tests and SonarQube analysis completed successfully"
+          echo ""
+          echo "=== ✓ Build, tests and SonarCloud analysis completed successfully ==="
+          echo "View results at: https://sonarcloud.io/project/overview?id=$PROJECT_KEY"
 
       - name: Wait for SonarQube analysis to complete
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          echo "Waiting for SonarQube analysis to complete..."
-          SONAR_HOST="${{ secrets.SONAR_HOST_URL }}"
-          SONAR_TOKEN="${{ secrets.SONAR_TOKEN }}"
-          PROJECT_KEY="ecommerce-microservice-backend"
+          echo "=== Waiting for SonarCloud analysis to complete ==="
+          SONAR_HOST="https://sonarcloud.io"
           
           # Obtener el projectKey del sonar-project.properties o usar el default
           if [ -f sonar-project.properties ]; then
@@ -82,42 +106,60 @@ jobs:
             PROJECT_KEY="alejoamu_Proyecto-final-Ingesoft-V"
           fi
           
-          MAX_WAIT=300  # 5 minutos máximo
-          ELAPSED=0
-          INTERVAL=5
+          echo "Project Key: $PROJECT_KEY"
+          echo "SonarCloud URL: $SONAR_HOST"
           
+          MAX_WAIT=600  # 10 minutos máximo
+          ELAPSED=0
+          INTERVAL=10
+          
+          echo "Polling SonarCloud API for analysis status..."
           while [ $ELAPSED -lt $MAX_WAIT ]; do
-            STATUS=$(curl -s -u "${SONAR_TOKEN}:" \
-              "${SONAR_HOST}/api/ce/activity?component=${PROJECT_KEY}&status=SUCCESS,FAILED,CANCELED" \
-              | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
+            # Obtener el estado del análisis más reciente
+            CE_RESPONSE=$(curl -s -u "${SONAR_TOKEN}:" \
+              "${SONAR_HOST}/api/ce/activity?component=${PROJECT_KEY}&ps=1" || echo "")
             
-            if [ "$STATUS" = "SUCCESS" ]; then
-              echo "Analysis completed successfully!"
-              break
-            elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
-              echo "Analysis failed or was canceled"
-              break
+            if [ -z "$CE_RESPONSE" ]; then
+              echo "[${ELAPSED}s/${MAX_WAIT}s] No response from SonarCloud API, retrying..."
+              sleep $INTERVAL
+              ELAPSED=$((ELAPSED + INTERVAL))
+              continue
             fi
             
-            echo "Waiting for analysis to complete... (${ELAPSED}s/${MAX_WAIT}s)"
+            STATUS=$(echo "$CE_RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
+            
+            if [ "$STATUS" = "SUCCESS" ]; then
+              echo "✓ Analysis completed successfully!"
+              break
+            elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
+              echo "✗ Analysis failed or was canceled (status: $STATUS)"
+              break
+            else
+              echo "[${ELAPSED}s/${MAX_WAIT}s] Analysis in progress (status: ${STATUS:-PENDING})..."
+            fi
+            
             sleep $INTERVAL
             ELAPSED=$((ELAPSED + INTERVAL))
           done
+          
+          if [ $ELAPSED -ge $MAX_WAIT ]; then
+            echo "⚠️  Timeout waiting for analysis to complete"
+            echo "The analysis may still be processing. PDF generation will attempt to proceed."
+          fi
 
       - name: Generate SonarQube PDF Report
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
         continue-on-error: true
         run: |
-          echo "Generating SonarQube PDF Report..."
+          echo "=== Generating SonarQube PDF Report ==="
           
           # Instalar dependencias para generar PDF
           sudo apt-get update
           sudo apt-get install -y python3 python3-pip
           pip3 install requests reportlab
           
-          SONAR_HOST="${{ secrets.SONAR_HOST_URL }}"
+          SONAR_HOST="https://sonarcloud.io"
           SONAR_TOKEN="${{ secrets.SONAR_TOKEN }}"
           
           # Obtener el projectKey del sonar-project.properties o usar el default
