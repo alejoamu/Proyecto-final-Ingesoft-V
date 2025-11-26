@@ -30,7 +30,33 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
-        run: ./mvnw -B sonar:sonar -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} -Dsonar.login=${{ secrets.SONAR_TOKEN }} -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+        run: |
+          # Obtener el projectKey del sonar-project.properties o usar el default
+          if [ -f sonar-project.properties ]; then
+            PROJECT_KEY=$(grep "^sonar.projectKey=" sonar-project.properties | cut -d'=' -f2 | tail -1 || echo "alejoamu_Proyecto-final-Ingesoft-V")
+          else
+            # Para SonarCloud, el formato es: organization_project-key
+            if [ -n "${{ secrets.SONAR_ORGANIZATION }}" ]; then
+              PROJECT_KEY="${{ secrets.SONAR_ORGANIZATION }}_Proyecto-final-Ingesoft-V"
+            else
+              PROJECT_KEY="alejoamu_Proyecto-final-Ingesoft-V"
+            fi
+          fi
+          
+          echo "Using SonarQube project key: $PROJECT_KEY"
+          echo "Organization: ${{ secrets.SONAR_ORGANIZATION }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit SHA: ${{ github.sha }}"
+          
+          # Ejecutar análisis de SonarQube con configuración explícita
+          # Es importante especificar la rama para que SonarCloud la reconozca
+          ./mvnw -B sonar:sonar \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
+            -Dsonar.projectKey=$PROJECT_KEY \
+            -Dsonar.branch.name=${{ github.ref_name }} \
+            -Dsonar.branch.target=main
 
       - name: Wait for SonarQube analysis to complete
         run: |
@@ -39,9 +65,11 @@ jobs:
           SONAR_TOKEN="${{ secrets.SONAR_TOKEN }}"
           PROJECT_KEY="ecommerce-microservice-backend"
           
-          # Obtener el projectKey del pom.xml o usar el default
-          if [ -f pom.xml ]; then
-            PROJECT_KEY=$(grep -oP '<sonar.projectKey>\K[^<]+' pom.xml || echo "ecommerce-microservice-backend")
+          # Obtener el projectKey del sonar-project.properties o usar el default
+          if [ -f sonar-project.properties ]; then
+            PROJECT_KEY=$(grep "^sonar.projectKey=" sonar-project.properties | cut -d'=' -f2 | tail -1 || echo "alejoamu_Proyecto-final-Ingesoft-V")
+          else
+            PROJECT_KEY="alejoamu_Proyecto-final-Ingesoft-V"
           fi
           
           MAX_WAIT=300  # 5 minutos máximo
@@ -80,12 +108,15 @@ jobs:
           
           SONAR_HOST="${{ secrets.SONAR_HOST_URL }}"
           SONAR_TOKEN="${{ secrets.SONAR_TOKEN }}"
-          PROJECT_KEY="ecommerce-microservice-backend"
           
-          # Obtener el projectKey del pom.xml
-          if [ -f pom.xml ]; then
-            PROJECT_KEY=$(grep -oP '<sonar.projectKey>\K[^<]+' pom.xml || echo "ecommerce-microservice-backend")
+          # Obtener el projectKey del sonar-project.properties o usar el default
+          if [ -f sonar-project.properties ]; then
+            PROJECT_KEY=$(grep "^sonar.projectKey=" sonar-project.properties | cut -d'=' -f2 | tail -1 || echo "alejoamu_Proyecto-final-Ingesoft-V")
+          else
+            PROJECT_KEY="alejoamu_Proyecto-final-Ingesoft-V"
           fi
+          
+          echo "Using project key for PDF: $PROJECT_KEY"
           
           # Crear script Python para generar PDF
           cat > generate_sonar_pdf.py << 'PYTHON_SCRIPT'

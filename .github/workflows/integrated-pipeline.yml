@@ -321,6 +321,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
 
@@ -456,37 +461,145 @@ jobs:
         run: |
           set -e
           echo "=== Waiting for deployments to be available ==="
+          echo "NOTE: It's normal for pods to take 1-3 minutes to become ready."
+          echo "Spring Boot services need time to:"
+          echo "  1. Start the application"
+          echo "  2. Connect to Eureka (service-discovery)"
+          echo "  3. Connect to Config Server (cloud-config)"
+          echo "  4. Pass health checks"
+          echo ""
+          
+          # Función para mostrar progreso
+          show_progress() {
+            echo "=== Current pod status ==="
+            kubectl -n ecommerce get pods -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready,AGE:.metadata.creationTimestamp
+            echo ""
+          }
+          
           # Esperar hasta 600s por todos los deployments
-          kubectl -n ecommerce wait --for=condition=available --timeout=600s deployment --all || {
+          echo "Waiting for deployments (max 10 minutes)..."
+          TIMEOUT=600
+          ELAPSED=0
+          INTERVAL=15
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if kubectl -n ecommerce wait --for=condition=available --timeout=${INTERVAL}s deployment --all 2>/dev/null; then
+              echo "✓ All deployments are available!"
+              break
+            fi
+            
+            ELAPSED=$((ELAPSED + INTERVAL))
+            echo "[${ELAPSED}s/${TIMEOUT}s] Still waiting for deployments..."
+            show_progress
+            sleep 5
+          done
+          
+          if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "=== Some deployments failed to become available ==="
             kubectl -n ecommerce get deployments -o wide
             kubectl -n ecommerce get pods -o wide
             kubectl -n ecommerce get events --sort-by='.lastTimestamp' | tail -30
             # Mostrar logs de pods que fallaron
-            for pod in $(kubectl -n ecommerce get pods -o jsonpath='{.items[?(@.status.phase!="Running")].metadata.name}'); do
-              echo "=== Logs for failed pod: $pod ==="
-              kubectl -n ecommerce logs "$pod" --tail=50 || true
-              kubectl -n ecommerce describe pod "$pod" | tail -30 || true
-            done
+            echo "=== Getting pods that failed ==="
+            FAILED_PODS=$(kubectl -n ecommerce get pods -o json | jq -r '.items[] | select(.status.phase!="Running" and .status.phase!="Succeeded") | .metadata.name' 2>/dev/null || kubectl -n ecommerce get pods --field-selector=status.phase!=Running,status.phase!=Succeeded -o jsonpath='{.items[*].metadata.name}')
+            
+            if [ -n "$FAILED_PODS" ]; then
+              for pod in $FAILED_PODS; do
+                echo "=== Logs for failed pod: $pod ==="
+                kubectl -n ecommerce logs "$pod" --tail=100 --all-containers=true || true
+                echo ""
+                echo "=== Describe pod: $pod ==="
+                kubectl -n ecommerce describe pod "$pod" | tail -50 || true
+                echo ""
+              done
+            else
+              echo "No failed pods found, but deployments are not available"
+              # Mostrar todos los pods para diagnóstico
+              echo "=== All pods status ==="
+              kubectl -n ecommerce get pods -o wide
+            fi
             exit 1
-          }
+          fi
           
-          echo "=== Waiting for pods to be ready ==="
-          # Y esperar hasta 600s por todos los pods Ready
-          kubectl -n ecommerce wait --for=condition=ready --timeout=600s pod --all || {
+          echo ""
+          echo "=== Waiting for pods to be ready (health checks passing) ==="
+          echo "This may take additional time as services complete their startup..."
+          
+          ELAPSED=0
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if kubectl -n ecommerce wait --for=condition=ready --timeout=${INTERVAL}s pod --all 2>/dev/null; then
+              echo "✓ All pods are ready!"
+              break
+            fi
+            
+            ELAPSED=$((ELAPSED + INTERVAL))
+            echo "[${ELAPSED}s/${TIMEOUT}s] Still waiting for pods to be ready..."
+            show_progress
+            
+            # Mostrar qué pods aún no están listos
+            if command -v jq &> /dev/null; then
+              NOT_READY=$(kubectl -n ecommerce get pods -o json | jq -r '.items[] | select(.status.containerStatuses[0].ready != true) | .metadata.name' 2>/dev/null | tr '\n' ' ' || echo "")
+            else
+              # Método alternativo sin jq
+              NOT_READY=$(kubectl -n ecommerce get pods -o wide | grep -v "1/1.*Running" | grep -v "NAME" | awk '{print $1}' | tr '\n' ' ' || echo "")
+            fi
+            
+            if [ -n "$NOT_READY" ]; then
+              echo "Pods not ready yet: $NOT_READY"
+              # Mostrar logs de los primeros 2 pods que no están listos
+              for pod in $(echo "$NOT_READY" | tr ' ' '\n' | head -2); do
+                echo "  Checking $pod..."
+                kubectl -n ecommerce logs "$pod" --tail=20 2>/dev/null | tail -5 || echo "    (logs not available yet)"
+                # Mostrar si el pod ha sido reiniciado
+                RESTARTS=$(kubectl -n ecommerce get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
+                if [ "$RESTARTS" != "0" ]; then
+                  echo "    ⚠️  Pod has been restarted $RESTARTS times"
+                  echo "    Previous container logs:"
+                  kubectl -n ecommerce logs "$pod" --previous --tail=10 2>/dev/null | tail -3 || echo "      (previous logs not available)"
+                fi
+              done
+            fi
+            echo ""
+            sleep 5
+          done
+          
+          if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "=== Some pods failed to become ready ==="
             kubectl -n ecommerce get pods -o wide
             kubectl -n ecommerce get events --sort-by='.lastTimestamp' | tail -30
             # Mostrar logs de pods que no están ready
-            for pod in $(kubectl -n ecommerce get pods -o jsonpath='{.items[?(@.status.conditions[?(@.type=="Ready")].status!="True")].metadata.name}'); do
-              echo "=== Logs for not-ready pod: $pod ==="
-              kubectl -n ecommerce logs "$pod" --tail=50 || true
-              kubectl -n ecommerce describe pod "$pod" | tail -30 || true
-            done
+            echo "=== Getting pods that are not ready ==="
+            # Usar jq si está disponible, sino usar método alternativo
+            if command -v jq &> /dev/null; then
+              NOT_READY_PODS=$(kubectl -n ecommerce get pods -o json | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status!="True")) | .metadata.name' 2>/dev/null || echo "")
+            else
+              # Método alternativo sin jq
+              NOT_READY_PODS=$(kubectl -n ecommerce get pods -o wide | grep -v "1/1.*Running" | grep -v "NAME" | awk '{print $1}' | grep -v "^$" || echo "")
+            fi
+            
+            if [ -n "$NOT_READY_PODS" ]; then
+              for pod in $NOT_READY_PODS; do
+                echo "=== Logs for not-ready pod: $pod ==="
+                kubectl -n ecommerce logs "$pod" --tail=100 --all-containers=true || true
+                echo ""
+                echo "=== Previous container logs (if restarted): $pod ==="
+                kubectl -n ecommerce logs "$pod" --tail=50 --previous 2>/dev/null || echo "No previous logs available"
+                echo ""
+                echo "=== Describe pod: $pod ==="
+                kubectl -n ecommerce describe pod "$pod" | tail -50 || true
+                echo ""
+              done
+            else
+              echo "No pods found that are not ready, but wait command failed"
+              # Mostrar todos los pods para diagnóstico
+              echo "=== All pods status ==="
+              kubectl -n ecommerce get pods -o wide
+            fi
             exit 1
-          }
+          fi
           
-          echo "=== All pods are ready ==="
+          echo ""
+          echo "=== All pods are ready! ==="
           kubectl -n ecommerce get pods -o wide
 
       - name: Port-forward services to localhost
