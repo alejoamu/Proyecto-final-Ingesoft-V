@@ -1,3 +1,9 @@
+## [1.0.10](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.9...v1.0.10) (2025-11-26)
+
+### Bug Fixes
+
+* Switch to local Docker image builds for kind ([1b52502](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/1b52502284988abb1882db2212e4a335804bd066))
+
 ## [1.0.9](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.8...v1.0.9) (2025-11-26)
 
 ### Bug Fixes
