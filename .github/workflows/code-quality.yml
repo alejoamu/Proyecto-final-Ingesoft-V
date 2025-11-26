@@ -228,6 +228,8 @@ jobs:
           cat > generate_sonar_pdf.py << 'PYTHON_SCRIPT'
           import requests
           import json
+          import time
+          import sys
           from reportlab.lib.pagesizes import letter, A4
           from reportlab.lib import colors
           from reportlab.lib.units import inch
@@ -235,7 +237,6 @@ jobs:
           from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
           from reportlab.lib.enums import TA_CENTER, TA_LEFT
           from datetime import datetime
-          import sys
           
           SONAR_HOST = sys.argv[1]
           SONAR_TOKEN = sys.argv[2]
@@ -285,18 +286,45 @@ jobs:
                           break
                       else:
                           print(f"Attempt {attempt + 1}: Got response but no measures found")
-                  elif response.status_code == 404:
-                      print(f"Attempt {attempt + 1}: Project not found or no analysis data (404)")
-                      if attempt < max_retries - 1:
-                          print(f"Waiting {retry_delay}s before retry...")
-                          time.sleep(retry_delay)
-                          continue
-                  else:
-                      print(f"Attempt {attempt + 1}: HTTP {response.status_code}")
-                      if attempt < max_retries - 1:
-                          print(f"Waiting {retry_delay}s before retry...")
-                          time.sleep(retry_delay)
-                          continue
+          elif response.status_code == 401:
+              print(f"Attempt {attempt + 1}: Authentication failed (HTTP 401)")
+              print("The SONAR_TOKEN may be invalid or expired.")
+              print("Please check your SonarCloud token in GitHub Secrets.")
+              if attempt < max_retries - 1:
+                  print(f"Waiting {retry_delay}s before retry...")
+                  time.sleep(retry_delay)
+                  continue
+              else:
+                  # Crear PDF con error de autenticación
+                  print("Creating PDF with authentication error message...")
+                  pdf_filename = 'sonarqube-report.pdf'
+                  doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+                  story = []
+                  styles = getSampleStyleSheet()
+                  title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#FF6B6B'), spaceAfter=30, alignment=TA_CENTER)
+                  story.append(Paragraph("SonarQube Quality Report", title_style))
+                  story.append(Paragraph(f"<b>Project:</b> {PROJECT_KEY}", styles['Normal']))
+                  story.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+                  story.append(Spacer(1, 0.2*inch))
+                  story.append(Paragraph("<b>Status:</b> <font color='red'>Authentication Error</font>", styles['Normal']))
+                  story.append(Paragraph("The SONAR_TOKEN is invalid or expired. Please update it in GitHub Secrets.", styles['Normal']))
+                  story.append(Spacer(1, 0.2*inch))
+                  story.append(Paragraph(f"<b>Project URL:</b> {SONAR_HOST}/dashboard?id={PROJECT_KEY}", styles['Normal']))
+                  doc.build(story)
+                  print(f"PDF report generated (auth error): {pdf_filename}")
+                  sys.exit(0)
+          elif response.status_code == 404:
+              print(f"Attempt {attempt + 1}: Project not found or no analysis data (404)")
+              if attempt < max_retries - 1:
+                  print(f"Waiting {retry_delay}s before retry...")
+                  time.sleep(retry_delay)
+                  continue
+          else:
+              print(f"Attempt {attempt + 1}: HTTP {response.status_code}")
+              if attempt < max_retries - 1:
+                  print(f"Waiting {retry_delay}s before retry...")
+                  time.sleep(retry_delay)
+                  continue
                   
                   if attempt == max_retries - 1:
                       # Último intento falló
