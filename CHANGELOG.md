@@ -1,3 +1,9 @@
+## [1.0.7](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.6...v1.0.7) (2025-11-26)
+
+### Bug Fixes
+
+* Refactor CI workflows and improve Docker image scanning ([b0f2443](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/b0f24434c7fc081e08f92f5412a556c3bf479f1d))
+
 ## [1.0.6](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.5...v1.0.6) (2025-11-26)
 
 ### Bug Fixes
