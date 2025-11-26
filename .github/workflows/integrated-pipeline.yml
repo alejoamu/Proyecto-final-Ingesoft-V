@@ -270,6 +270,15 @@ jobs:
           platforms: linux/amd64
           build-args: |
             PROJECT_VERSION=0.1.0
+          
+      - name: List pushed image tags
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Tags generated for ${{ matrix.service }}:"
+          echo "${{ steps.meta.outputs.tags }}"
+          echo ""
+          echo "Full image name:"
+          echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ steps.repo-name.outputs.repo_name_lower }}/${{ matrix.service }}"
 
       - name: Build image for local scan
         uses: docker/build-push-action@v5
@@ -343,27 +352,55 @@ jobs:
         run: |
           set -e
           REPO_NAME_LOWER=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          
+          # Lista de tags a intentar en orden de prioridad
+          # El formato type=sha,prefix={{branch}}- genera: main-<sha>
+          # type=ref,event=branch genera: main
+          TAGS_TO_TRY=(
+            "${{ github.ref_name }}-${{ github.sha }}"
+            "main-${{ github.sha }}"
+            "${{ github.ref_name }}"
+            "main"
+          )
+          
           for service in product-service user-service payment-service order-service shipping-service favourite-service api-gateway cloud-config service-discovery proxy-client; do
-            IMAGE_TAG="${{ env.REGISTRY }}/${{ github.repository_owner }}/$REPO_NAME_LOWER/$service:${{ github.ref_name }}-${{ github.sha }}"
-            echo "Pulling image: $IMAGE_TAG"
-            docker pull "$IMAGE_TAG" || {
-              echo "WARNING: Failed to pull $IMAGE_TAG, trying alternative tag..."
-              # Intentar con tag main-<sha> si el anterior falla
-              ALTERNATIVE_TAG="${{ env.REGISTRY }}/${{ github.repository_owner }}/$REPO_NAME_LOWER/$service:main-${{ github.sha }}"
-              docker pull "$ALTERNATIVE_TAG" || {
-                echo "ERROR: Failed to pull both $IMAGE_TAG and $ALTERNATIVE_TAG"
-                exit 1
-              }
-              IMAGE_TAG="$ALTERNATIVE_TAG"
-            }
+            IMAGE_BASE="${{ env.REGISTRY }}/${{ github.repository_owner }}/$REPO_NAME_LOWER/$service"
+            IMAGE_TAG=""
+            PULLED=false
+            
+            echo "=== Attempting to pull $service ==="
+            for tag in "${TAGS_TO_TRY[@]}"; do
+              FULL_TAG="${IMAGE_BASE}:${tag}"
+              echo "Trying tag: $FULL_TAG"
+              if docker pull "$FULL_TAG" 2>/dev/null; then
+                IMAGE_TAG="$FULL_TAG"
+                PULLED=true
+                echo "✓ Successfully pulled: $FULL_TAG"
+                break
+              else
+                echo "✗ Failed to pull: $FULL_TAG"
+              fi
+            done
+            
+            if [ "$PULLED" = false ]; then
+              echo "ERROR: Failed to pull $service with any of the attempted tags"
+              echo "Available tags in registry (if any):"
+              # Intentar listar tags disponibles (puede fallar si no hay permisos)
+              curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                "https://ghcr.io/v2/${{ github.repository_owner }}/$REPO_NAME_LOWER/$service/tags/list" | jq -r '.tags[]' 2>/dev/null | head -10 || echo "Could not list tags"
+              exit 1
+            fi
+            
             echo "Loading image into kind: $IMAGE_TAG"
-            kind load docker-image "$IMAGE_TAG" --name e2e-test || {
+            if kind load docker-image "$IMAGE_TAG" --name e2e-test; then
+              echo "✓ Successfully loaded $service"
+            else
               echo "ERROR: Failed to load $IMAGE_TAG into kind"
               exit 1
-            }
-            echo "Successfully loaded $service"
+            fi
           done
-          echo "Verifying images in kind..."
+          
+          echo "=== Verifying images in kind ==="
           docker exec e2e-test-control-plane crictl images | grep -E "(product-service|user-service|api-gateway)" || true
 
       - name: Update Kubernetes manifests with correct images
