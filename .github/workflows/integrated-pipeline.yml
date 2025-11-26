@@ -278,8 +278,6 @@ jobs:
           format: 'sarif'
           output: 'trivy-image-${{ matrix.service }}.sarif'
           severity: 'CRITICAL,HIGH'
-          output: 'trivy-image-${{ matrix.service }}.sarif'
-          severity: 'CRITICAL,HIGH'
         if: github.event_name != 'pull_request'
 
       - name: Upload Trivy image scan results
