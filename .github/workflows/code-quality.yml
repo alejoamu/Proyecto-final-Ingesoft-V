@@ -47,16 +47,28 @@ jobs:
           echo "Organization: ${{ secrets.SONAR_ORGANIZATION }}"
           echo "Branch: ${{ github.ref_name }}"
           echo "Commit SHA: ${{ github.sha }}"
+          echo "SonarQube Host: ${{ secrets.SONAR_HOST_URL }}"
           
           # Ejecutar análisis de SonarQube con configuración explícita
           # Es importante especificar la rama para que SonarCloud la reconozca
+          echo "Running SonarQube analysis..."
           ./mvnw -B sonar:sonar \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
             -Dsonar.projectKey=$PROJECT_KEY \
             -Dsonar.branch.name=${{ github.ref_name }} \
-            -Dsonar.branch.target=main
+            -Dsonar.branch.target=main || {
+              echo "ERROR: SonarQube analysis failed"
+              echo "Please check:"
+              echo "  1. SONAR_TOKEN is valid"
+              echo "  2. SONAR_ORGANIZATION is correct"
+              echo "  3. Project key '$PROJECT_KEY' exists in SonarCloud"
+              echo "  4. SonarQube host URL is correct: ${{ secrets.SONAR_HOST_URL }}"
+              exit 1
+            }
+          
+          echo "SonarQube analysis completed successfully"
 
       - name: Wait for SonarQube analysis to complete
         run: |
@@ -98,12 +110,13 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+        continue-on-error: true
         run: |
           echo "Generating SonarQube PDF Report..."
           
           # Instalar dependencias para generar PDF
           sudo apt-get update
-          sudo apt-get install -y python3 python3-pip wkhtmltopdf
+          sudo apt-get install -y python3 python3-pip
           pip3 install requests reportlab
           
           SONAR_HOST="${{ secrets.SONAR_HOST_URL }}"
@@ -117,6 +130,7 @@ jobs:
           fi
           
           echo "Using project key for PDF: $PROJECT_KEY"
+          echo "SonarQube host: $SONAR_HOST"
           
           # Crear script Python para generar PDF
           cat > generate_sonar_pdf.py << 'PYTHON_SCRIPT'
@@ -147,7 +161,42 @@ jobs:
           }
           
           try:
+              # Primero verificar que el proyecto existe
+              print(f"Checking if project exists: {PROJECT_KEY}")
+              search_url = f"{base_url}/projects/search"
+              search_params = {'q': PROJECT_KEY}
+              search_response = requests.get(search_url, params=search_params, auth=auth, timeout=30)
+              
+              if search_response.status_code == 404:
+                  print(f"ERROR: Project '{PROJECT_KEY}' not found in SonarCloud")
+                  print("Available projects:")
+                  all_projects = requests.get(search_url, params={'ps': 100}, auth=auth, timeout=30)
+                  if all_projects.status_code == 200:
+                      projects = all_projects.json().get('components', [])
+                      for proj in projects[:10]:
+                          print(f"  - {proj.get('key', 'N/A')}: {proj.get('name', 'N/A')}")
+                  sys.exit(1)
+              
               response = requests.get(metrics_url, params=metrics_params, auth=auth, timeout=30)
+              
+              if response.status_code == 404:
+                  print(f"WARNING: Project '{PROJECT_KEY}' exists but has no analysis data yet")
+                  print("The project may need to be analyzed first.")
+                  print(f"Please check: {SONAR_HOST}/dashboard?id={PROJECT_KEY}")
+                  # Crear un PDF básico indicando que no hay datos
+                  pdf_filename = 'sonarqube-report.pdf'
+                  doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+                  story = []
+                  styles = getSampleStyleSheet()
+                  story.append(Paragraph("SonarQube Quality Report", styles['Heading1']))
+                  story.append(Paragraph(f"<b>Project:</b> {PROJECT_KEY}", styles['Normal']))
+                  story.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+                  story.append(Paragraph("<b>Status:</b> No analysis data available yet. Please run SonarQube analysis first.", styles['Normal']))
+                  story.append(Paragraph(f"<b>Project URL:</b> {SONAR_HOST}/dashboard?id={PROJECT_KEY}", styles['Normal']))
+                  doc.build(story)
+                  print(f"PDF report generated (no data): {pdf_filename}")
+                  sys.exit(0)
+              
               response.raise_for_status()
               measures_data = response.json()
               
@@ -252,12 +301,55 @@ jobs:
               doc.build(story)
               print(f"PDF report generated: {pdf_filename}")
               
+          except requests.exceptions.HTTPError as e:
+              print(f"HTTP Error: {e.response.status_code} - {str(e)}")
+              if e.response.status_code == 404:
+                  print(f"Project '{PROJECT_KEY}' not found or has no analysis data")
+                  # Crear PDF básico con mensaje de error
+                  pdf_filename = 'sonarqube-report.pdf'
+                  doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+                  story = []
+                  styles = getSampleStyleSheet()
+                  story.append(Paragraph("SonarQube Quality Report", styles['Heading1']))
+                  story.append(Paragraph(f"<b>Project:</b> {PROJECT_KEY}", styles['Normal']))
+                  story.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+                  story.append(Spacer(1, 0.2*inch))
+                  story.append(Paragraph("<b>Status:</b> Error - Project not found or no analysis data", styles['Normal']))
+                  story.append(Paragraph(f"<b>Error:</b> HTTP {e.response.status_code}", styles['Normal']))
+                  story.append(Spacer(1, 0.2*inch))
+                  story.append(Paragraph(f"<b>Project URL:</b> {SONAR_HOST}/dashboard?id={PROJECT_KEY}", styles['Normal']))
+                  doc.build(story)
+                  print(f"PDF report generated (error): {pdf_filename}")
+                  sys.exit(0)
+              else:
+                  raise
           except Exception as e:
               print(f"Error generating PDF: {str(e)}")
+              import traceback
+              traceback.print_exc()
+              # Crear PDF básico de error
+              try:
+                  pdf_filename = 'sonarqube-report.pdf'
+                  doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+                  story = []
+                  styles = getSampleStyleSheet()
+                  story.append(Paragraph("SonarQube Quality Report", styles['Heading1']))
+                  story.append(Paragraph(f"<b>Project:</b> {PROJECT_KEY}", styles['Normal']))
+                  story.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+                  story.append(Spacer(1, 0.2*inch))
+                  story.append(Paragraph("<b>Status:</b> Error generating report", styles['Normal']))
+                  story.append(Paragraph(f"<b>Error:</b> {str(e)[:200]}", styles['Normal']))
+                  doc.build(story)
+                  print(f"Basic error PDF created: {pdf_filename}")
+              except:
+                  pass
               sys.exit(1)
           PYTHON_SCRIPT
           
-          python3 generate_sonar_pdf.py "$SONAR_HOST" "$SONAR_TOKEN" "$PROJECT_KEY"
+          echo "Executing PDF generation script..."
+          python3 generate_sonar_pdf.py "$SONAR_HOST" "$SONAR_TOKEN" "$PROJECT_KEY" || {
+            echo "WARNING: PDF generation encountered an error, but a basic PDF may have been created"
+          }
 
       - name: Upload SonarQube PDF Report
         uses: actions/upload-artifact@v4
