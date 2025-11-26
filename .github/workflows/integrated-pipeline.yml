@@ -263,9 +263,23 @@ jobs:
           context: .
           file: ${{ matrix.service }}/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          load: true
-          tags: ${{ steps.meta.outputs.tags }},${{ matrix.service }}:local-scan
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          build-args: |
+            PROJECT_VERSION=0.1.0
+
+      - name: Build image for local scan
+        uses: docker/build-push-action@v5
+        if: github.event_name != 'pull_request'
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          push: false
+          load: true
+          tags: ${{ matrix.service }}:local-scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
