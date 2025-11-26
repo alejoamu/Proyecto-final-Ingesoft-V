@@ -1,3 +1,9 @@
+## [1.0.14](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.13...v1.0.14) (2025-11-26)
+
+### Bug Fixes
+
+* Remove ci-all-pages workflow and update pipeline steps ([016983e](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/016983ea82a76c4f70279d35517bc6b2f187f4c5))
+
 ## [1.0.13](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.12...v1.0.13) (2025-11-26)
 
 ### Bug Fixes
