@@ -1,3 +1,9 @@
+## [1.0.15](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.14...v1.0.15) (2025-11-26)
+
+### Bug Fixes
+
+* Improve SonarCloud analysis polling robustness ([34c5654](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/34c565469c970849f51d7b0e4f04efab079fdb9b))
+
 ## [1.0.14](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.13...v1.0.14) (2025-11-26)
 
 ### Bug Fixes
