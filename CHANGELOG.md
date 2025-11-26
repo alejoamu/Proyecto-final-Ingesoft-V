@@ -1,3 +1,10 @@
+## [1.0.13](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.12...v1.0.13) (2025-11-26)
+
+### Bug Fixes
+
+* Improve SonarCloud and Kubernetes deployment workflows ([01e0dec](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/01e0decb7694a6aa9473919823a0934ea1460f48))
+* Improve SonarQube workflow reliability and caching ([355ec65](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/355ec65f21298b8757a9f13c86dd974040db5569))
+
 ## [1.0.12](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.11...v1.0.12) (2025-11-26)
 
 ### Bug Fixes
