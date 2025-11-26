@@ -1,3 +1,9 @@
+## [1.0.5](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.4...v1.0.5) (2025-11-26)
+
+### Bug Fixes
+
+* Remove duplicate Trivy scan arguments ([d36c529](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/d36c529d0a7080cd9daa75d78bd03eba7708a586))
+
 ## [1.0.4](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.3...v1.0.4) (2025-11-26)
 
 ### Features
