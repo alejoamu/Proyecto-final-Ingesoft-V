@@ -1,3 +1,9 @@
+## [1.0.9](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.8...v1.0.9) (2025-11-26)
+
+### Bug Fixes
+
+* Improve image pulling logic in pipeline workflow ([dd79519](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/dd79519bfac1c978dbadb8932dda11e15ffa4dae))
+
 ## [1.0.8](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.7...v1.0.8) (2025-11-26)
 
 ### Bug Fixes
