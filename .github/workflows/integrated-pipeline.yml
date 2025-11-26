@@ -28,6 +28,7 @@ env:
   JAVA_VERSION: '11'
   MAVEN_OPTS: '-Xmx3072m'
   REGISTRY: ghcr.io
+  REPO_NAME_LOWER: ${{ github.event.repository.name }}
   IMAGE_PREFIX: ${{ github.repository_owner }}/${{ github.event.repository.name }}
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
   ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
@@ -205,6 +206,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set repository name to lowercase
+        id: repo-name
+        run: |
+          REPO_NAME_LOWER=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          echo "REPO_NAME_LOWER=$REPO_NAME_LOWER" >> $GITHUB_ENV
+          echo "repo_name_lower=$REPO_NAME_LOWER" >> $GITHUB_OUTPUT
+
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
@@ -241,7 +249,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ steps.repo-name.outputs.repo_name_lower }}/${{ matrix.service }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -266,8 +274,10 @@ jobs:
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ steps.repo-name.outputs.repo_name_lower }}/${{ matrix.service }}:main-${{ github.sha }}
           format: 'sarif'
+          output: 'trivy-image-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
           output: 'trivy-image-${{ matrix.service }}.sarif'
           severity: 'CRITICAL,HIGH'
         if: github.event_name != 'pull_request'
@@ -304,7 +314,7 @@ jobs:
       - name: Load images into kind
         run: |
           for service in product-service user-service payment-service order-service shipping-service favourite-service api-gateway cloud-config service-discovery proxy-client; do
-            kind load docker-image ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ github.sha }} --name e2e-test || true
+            kind load docker-image ${{ env.REGISTRY }}/${{ github.repository_owner }}/proyecto-final-ingesoft-v/$service:${{ github.ref_name }}-${{ github.sha }} --name e2e-test || true
           done
 
       - name: Apply Kubernetes manifests

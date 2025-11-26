@@ -1,11 +1,10 @@
 name: CI + E2E + Locust + Pages
 
-# DISABLED - Solo code-quality.yml está habilitado
 on:
-  # push:
-  #   branches: [ main, master, dev ]
-  # pull_request:
-  #   branches: [ main, master, dev ]
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master, dev ]
   workflow_dispatch: {}
 
 permissions:

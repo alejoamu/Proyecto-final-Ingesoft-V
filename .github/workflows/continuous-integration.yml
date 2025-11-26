@@ -1,11 +1,10 @@
 name: Continuous Integration
 
-# DISABLED - Solo code-quality.yml está habilitado
 on:
-  # push:
-  #   branches: [ main, master, develop, staging ]
-  # pull_request:
-  #   branches: [ main, master, develop ]
+  push:
+    branches: [ main, master, develop, staging ]
+  pull_request:
+    branches: [ main, master, develop ]
   workflow_dispatch: {}
 
 env:
