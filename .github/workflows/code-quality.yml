@@ -95,6 +95,7 @@ jobs:
       - name: Wait for SonarQube analysis to complete
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
         run: |
           echo "=== Waiting for SonarCloud analysis to complete ==="
           SONAR_HOST="https://sonarcloud.io"
@@ -109,33 +110,82 @@ jobs:
           echo "Project Key: $PROJECT_KEY"
           echo "SonarCloud URL: $SONAR_HOST"
           
-          MAX_WAIT=600  # 10 minutos máximo
-          ELAPSED=0
-          INTERVAL=10
+          # Verificar que el token esté configurado
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "⚠️  SONAR_TOKEN not set, skipping API polling"
+            exit 0
+          fi
           
-          echo "Polling SonarCloud API for analysis status..."
+          # Verificar conectividad con SonarCloud
+          echo "Testing connection to SonarCloud API..."
+          API_TEST=$(curl -s -w "\n%{http_code}" -u "${SONAR_TOKEN}:" \
+            "${SONAR_HOST}/api/system/status" 2>&1 || echo "ERROR")
+          
+          HTTP_CODE=$(echo "$API_TEST" | tail -1)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "⚠️  Cannot connect to SonarCloud API (HTTP $HTTP_CODE)"
+            echo "Response: $(echo "$API_TEST" | head -n -1)"
+            echo "This may be due to:"
+            echo "  1. Invalid SONAR_TOKEN"
+            echo "  2. Network issues"
+            echo "  3. SonarCloud API temporarily unavailable"
+            echo "Continuing without waiting for analysis completion..."
+            exit 0
+          fi
+          
+          echo "✓ Successfully connected to SonarCloud API"
+          
+          MAX_WAIT=300  # 5 minutos máximo (reducido)
+          ELAPSED=0
+          INTERVAL=15
+          
+          echo "Polling SonarCloud API for analysis status (max ${MAX_WAIT}s)..."
           while [ $ELAPSED -lt $MAX_WAIT ]; do
             # Obtener el estado del análisis más reciente
-            CE_RESPONSE=$(curl -s -u "${SONAR_TOKEN}:" \
-              "${SONAR_HOST}/api/ce/activity?component=${PROJECT_KEY}&ps=1" || echo "")
+            CE_RESPONSE=$(curl -s -w "\n%{http_code}" -u "${SONAR_TOKEN}:" \
+              "${SONAR_HOST}/api/ce/activity?component=${PROJECT_KEY}&ps=1" 2>&1 || echo "ERROR")
             
-            if [ -z "$CE_RESPONSE" ]; then
-              echo "[${ELAPSED}s/${MAX_WAIT}s] No response from SonarCloud API, retrying..."
+            HTTP_CODE=$(echo "$CE_RESPONSE" | tail -1)
+            RESPONSE_BODY=$(echo "$CE_RESPONSE" | head -n -1)
+            
+            if [ "$HTTP_CODE" != "200" ]; then
+              if [ "$HTTP_CODE" = "404" ]; then
+                echo "⚠️  Project '$PROJECT_KEY' not found in SonarCloud (HTTP 404)"
+                echo "The analysis may not have been submitted, or the project doesn't exist yet."
+                echo "Continuing without waiting..."
+                exit 0
+              else
+                echo "[${ELAPSED}s/${MAX_WAIT}s] API error (HTTP $HTTP_CODE), retrying..."
+                sleep $INTERVAL
+                ELAPSED=$((ELAPSED + INTERVAL))
+                continue
+              fi
+            fi
+            
+            if [ -z "$RESPONSE_BODY" ] || [ "$RESPONSE_BODY" = "ERROR" ]; then
+              echo "[${ELAPSED}s/${MAX_WAIT}s] Empty or invalid response, retrying..."
               sleep $INTERVAL
               ELAPSED=$((ELAPSED + INTERVAL))
               continue
             fi
             
-            STATUS=$(echo "$CE_RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
-            
-            if [ "$STATUS" = "SUCCESS" ]; then
-              echo "✓ Analysis completed successfully!"
-              break
-            elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
-              echo "✗ Analysis failed or was canceled (status: $STATUS)"
-              break
+            # Verificar si hay análisis en la respuesta
+            if echo "$RESPONSE_BODY" | grep -q '"tasks"'; then
+              STATUS=$(echo "$RESPONSE_BODY" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "")
+              
+              if [ "$STATUS" = "SUCCESS" ]; then
+                echo "✓ Analysis completed successfully!"
+                break
+              elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
+                echo "✗ Analysis failed or was canceled (status: $STATUS)"
+                break
+              elif [ -n "$STATUS" ]; then
+                echo "[${ELAPSED}s/${MAX_WAIT}s] Analysis in progress (status: $STATUS)..."
+              else
+                echo "[${ELAPSED}s/${MAX_WAIT}s] No analysis found yet, waiting..."
+              fi
             else
-              echo "[${ELAPSED}s/${MAX_WAIT}s] Analysis in progress (status: ${STATUS:-PENDING})..."
+              echo "[${ELAPSED}s/${MAX_WAIT}s] No analysis tasks found, waiting..."
             fi
             
             sleep $INTERVAL
@@ -143,8 +193,10 @@ jobs:
           done
           
           if [ $ELAPSED -ge $MAX_WAIT ]; then
-            echo "⚠️  Timeout waiting for analysis to complete"
-            echo "The analysis may still be processing. PDF generation will attempt to proceed."
+            echo "⚠️  Timeout waiting for analysis to complete (${MAX_WAIT}s)"
+            echo "The analysis may still be processing in SonarCloud."
+            echo "You can check the status at: ${SONAR_HOST}/project/overview?id=${PROJECT_KEY}"
+            echo "PDF generation will proceed with available data."
           fi
 
       - name: Generate SonarQube PDF Report
