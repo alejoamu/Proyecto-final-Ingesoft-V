@@ -325,21 +325,201 @@ jobs:
           kind create cluster --name e2e-test --wait 120s
           kubectl version --client
 
-      - name: Load images into kind
+      - name: Set repository name to lowercase
+        id: repo-name
         run: |
+          REPO_NAME_LOWER=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          echo "REPO_NAME_LOWER=$REPO_NAME_LOWER" >> $GITHUB_ENV
+          echo "repo_name_lower=$REPO_NAME_LOWER" >> $GITHUB_OUTPUT
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and load images into kind
+        run: |
+          set -e
+          REPO_NAME_LOWER=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
           for service in product-service user-service payment-service order-service shipping-service favourite-service api-gateway cloud-config service-discovery proxy-client; do
-            kind load docker-image ${{ env.REGISTRY }}/${{ github.repository_owner }}/proyecto-final-ingesoft-v/$service:${{ github.ref_name }}-${{ github.sha }} --name e2e-test || true
+            IMAGE_TAG="${{ env.REGISTRY }}/${{ github.repository_owner }}/$REPO_NAME_LOWER/$service:${{ github.ref_name }}-${{ github.sha }}"
+            echo "Pulling image: $IMAGE_TAG"
+            docker pull "$IMAGE_TAG" || {
+              echo "WARNING: Failed to pull $IMAGE_TAG, trying alternative tag..."
+              # Intentar con tag main-<sha> si el anterior falla
+              ALTERNATIVE_TAG="${{ env.REGISTRY }}/${{ github.repository_owner }}/$REPO_NAME_LOWER/$service:main-${{ github.sha }}"
+              docker pull "$ALTERNATIVE_TAG" || {
+                echo "ERROR: Failed to pull both $IMAGE_TAG and $ALTERNATIVE_TAG"
+                exit 1
+              }
+              IMAGE_TAG="$ALTERNATIVE_TAG"
+            }
+            echo "Loading image into kind: $IMAGE_TAG"
+            kind load docker-image "$IMAGE_TAG" --name e2e-test || {
+              echo "ERROR: Failed to load $IMAGE_TAG into kind"
+              exit 1
+            }
+            echo "Successfully loaded $service"
           done
+          echo "Verifying images in kind..."
+          docker exec e2e-test-control-plane crictl images | grep -E "(product-service|user-service|api-gateway)" || true
+
+      - name: Update Kubernetes manifests with correct images
+        run: |
+          set -e
+          REPO_NAME_LOWER=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          echo "Replacing images in Kubernetes manifests..."
+          echo "Repository: $REPO_NAME_LOWER"
+          echo "Tag: ${{ github.ref_name }}-${{ github.sha }}"
+          
+          # Reemplazar imágenes en los manifests
+          for service in product-service user-service shipping-service payment-service order-service favourite-service api-gateway cloud-config service-discovery proxy-client; do
+            OLD_IMAGE="selimhorri/${service}-ecommerce-boot:0.1.0"
+            NEW_IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/$REPO_NAME_LOWER/${service}:${{ github.ref_name }}-${{ github.sha }}"
+            echo "Replacing $OLD_IMAGE -> $NEW_IMAGE"
+            find k8s -name "*.yaml" -type f -not -path "*/security/*" -exec sed -i "s|${OLD_IMAGE}|${NEW_IMAGE}|g" {} \;
+          done
+          
+          echo "Verifying image replacements..."
+          grep -r "ghcr.io" k8s/*.yaml | head -5 || true
 
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -k k8s
           kubectl get ns ecommerce || kubectl create ns ecommerce
 
-      - name: Wait for deployments
+      - name: Check pod status and diagnose issues
         run: |
-          kubectl -n ecommerce wait --for=condition=available --timeout=600s deployment --all || true
+          set -e
+          echo "=== Checking initial pod status ==="
           kubectl -n ecommerce get pods -o wide
+          
+          echo "=== Waiting for pods to be created (30s) ==="
+          sleep 30
+          
+          echo "=== Checking pod status after sleep ==="
+          kubectl -n ecommerce get pods -o wide
+          
+          echo "=== Checking events ==="
+          kubectl -n ecommerce get events --sort-by='.lastTimestamp' | tail -20
+          
+          echo "=== Checking pods in detail ==="
+          for pod in $(kubectl -n ecommerce get pods -o jsonpath='{.items[*].metadata.name}'); do
+            echo "--- Pod: $pod ---"
+            kubectl -n ecommerce describe pod "$pod" | grep -A 10 "Events:" || true
+            kubectl -n ecommerce describe pod "$pod" | grep -A 5 "Status:" || true
+            echo ""
+          done
+
+      - name: Wait for deployments Ready
+        run: |
+          set -e
+          echo "=== Waiting for deployments to be available ==="
+          # Esperar hasta 600s por todos los deployments
+          kubectl -n ecommerce wait --for=condition=available --timeout=600s deployment --all || {
+            echo "=== Some deployments failed to become available ==="
+            kubectl -n ecommerce get deployments -o wide
+            kubectl -n ecommerce get pods -o wide
+            kubectl -n ecommerce get events --sort-by='.lastTimestamp' | tail -30
+            # Mostrar logs de pods que fallaron
+            for pod in $(kubectl -n ecommerce get pods -o jsonpath='{.items[?(@.status.phase!="Running")].metadata.name}'); do
+              echo "=== Logs for failed pod: $pod ==="
+              kubectl -n ecommerce logs "$pod" --tail=50 || true
+              kubectl -n ecommerce describe pod "$pod" | tail -30 || true
+            done
+            exit 1
+          }
+          
+          echo "=== Waiting for pods to be ready ==="
+          # Y esperar hasta 600s por todos los pods Ready
+          kubectl -n ecommerce wait --for=condition=ready --timeout=600s pod --all || {
+            echo "=== Some pods failed to become ready ==="
+            kubectl -n ecommerce get pods -o wide
+            kubectl -n ecommerce get events --sort-by='.lastTimestamp' | tail -30
+            # Mostrar logs de pods que no están ready
+            for pod in $(kubectl -n ecommerce get pods -o jsonpath='{.items[?(@.status.conditions[?(@.type=="Ready")].status!="True")].metadata.name}'); do
+              echo "=== Logs for not-ready pod: $pod ==="
+              kubectl -n ecommerce logs "$pod" --tail=50 || true
+              kubectl -n ecommerce describe pod "$pod" | tail -30 || true
+            done
+            exit 1
+          }
+          
+          echo "=== All pods are ready ==="
+          kubectl -n ecommerce get pods -o wide
+
+      - name: Port-forward services to localhost
+        run: |
+          set -e
+          # Obtiene el primer pod por etiqueta app
+          pod_of() { kubectl -n "$1" get pod -l app="$2" -o jsonpath='{.items[0].metadata.name}'; }
+
+          P_PRODUCT=$(pod_of ecommerce product-service)
+          P_USER=$(pod_of ecommerce user-service)
+          P_SHIP=$(pod_of ecommerce shipping-service)
+          P_PAY=$(pod_of ecommerce payment-service)
+          P_ORDER=$(pod_of ecommerce order-service)
+          P_FAV=$(pod_of ecommerce favourite-service)
+
+          echo "PF -> product-service: $P_PRODUCT, user-service: $P_USER, shipping: $P_SHIP, payment: $P_PAY, order: $P_ORDER, favourite: $P_FAV"
+
+          # Lanzar port-forwards a pods en background
+          nohup kubectl -n ecommerce port-forward pod/$P_PRODUCT 8500:8500 >/dev/null 2>&1 & echo $! > pf_product.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_USER 8700:8700 >/dev/null 2>&1 & echo $! > pf_user.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_SHIP 8600:8600 >/dev/null 2>&1 & echo $! > pf_shipping.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_PAY 8400:8400 >/dev/null 2>&1 & echo $! > pf_payment.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_ORDER 8300:8300 >/dev/null 2>&1 & echo $! > pf_order.pid
+          nohup kubectl -n ecommerce port-forward pod/$P_FAV 8800:8800 >/dev/null 2>&1 & echo $! > pf_favourite.pid
+          
+          # Esperar un poco a que los port-forwards estén activos
+          sleep 10
+
+      - name: Warm-up and readiness checks (retry)
+        run: |
+          set -e
+          retry() { for i in $(seq 1 24); do curl -fsS "$1" && echo "\nOK: $1" && return 0; echo "Retry $i: $1"; sleep 5; done; return 1; }
+
+          if ! retry http://localhost:8500/product-service/api/products; then
+            echo "DIAGNOSTICO: estado de product-service";
+            kubectl -n ecommerce get svc product-service -o yaml || true
+            kubectl -n ecommerce get endpoints product-service -o wide || true
+            kubectl -n ecommerce get pod -l app=product-service -o wide || true
+            P_PRODUCT=$(kubectl -n ecommerce get pod -l app=product-service -o jsonpath='{.items[0].metadata.name}' || true)
+            [ -n "$P_PRODUCT" ] && kubectl -n ecommerce logs "$P_PRODUCT" --tail=200 || true
+            exit 1
+          fi
+
+          if ! retry http://localhost:8700/user-service/api/users; then
+            echo "DIAGNOSTICO: estado de user-service";
+            kubectl -n ecommerce get pod -l app=user-service -o wide || true
+            exit 1
+          fi
+
+          if ! retry http://localhost:8600/shipping-service/api/shippings; then
+            echo "DIAGNOSTICO: estado de shipping-service";
+            kubectl -n ecommerce get pod -l app=shipping-service -o wide || true
+            exit 1
+          fi
+
+          if ! retry http://localhost:8400/payment-service/api/payments; then
+            echo "DIAGNOSTICO: estado de payment-service";
+            kubectl -n ecommerce get pod -l app=payment-service -o wide || true
+            exit 1
+          fi
+
+          if ! retry http://localhost:8300/order-service/api/orders; then
+            echo "DIAGNOSTICO: estado de order-service";
+            kubectl -n ecommerce get pod -l app=order-service -o wide || true
+            exit 1
+          fi
+
+          if ! retry http://localhost:8800/favourite-service/api/favourites; then
+            echo "DIAGNOSTICO: estado de favourite-service";
+            kubectl -n ecommerce get pod -l app=favourite-service -o wide || true
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -361,6 +541,17 @@ jobs:
         with:
           name: e2e-results
           path: newman-results.xml
+
+      - name: Cleanup port-forwards
+        if: always()
+        run: |
+          for pidfile in pf_*.pid; do
+            if [ -f "$pidfile" ]; then
+              kill $(cat "$pidfile") 2>/dev/null || true
+              rm -f "$pidfile"
+            fi
+          done
+          pkill -f "kubectl.*port-forward" || true
 
       - name: Cleanup
         if: always()

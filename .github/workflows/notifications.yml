@@ -4,8 +4,15 @@ on:
   workflow_run:
     workflows:
       - Code Quality & Security
+      - Integrated CI/CD Pipeline
+      - Semantic Release
+      - Master Environment Pipeline
+      - CI + E2E + Locust + Pages
     types:
       - completed
+    branches:
+      - main
+      - master
 
 env:
   # Webhook Slack (tomado de secrets para entorno real)
