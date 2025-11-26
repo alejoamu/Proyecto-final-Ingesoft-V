@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -23,10 +25,14 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Build & Test
-        run: ./mvnw -B clean verify -DskipTests=false -DfailIfNoTests=false
+      - name: Cache SonarQube packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
 
-      - name: SonarQube Scan
+      - name: Build and analyze
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
@@ -35,40 +41,32 @@ jobs:
           if [ -f sonar-project.properties ]; then
             PROJECT_KEY=$(grep "^sonar.projectKey=" sonar-project.properties | cut -d'=' -f2 | tail -1 || echo "alejoamu_Proyecto-final-Ingesoft-V")
           else
-            # Para SonarCloud, el formato es: organization_project-key
-            if [ -n "${{ secrets.SONAR_ORGANIZATION }}" ]; then
-              PROJECT_KEY="${{ secrets.SONAR_ORGANIZATION }}_Proyecto-final-Ingesoft-V"
-            else
-              PROJECT_KEY="alejoamu_Proyecto-final-Ingesoft-V"
-            fi
+            PROJECT_KEY="alejoamu_Proyecto-final-Ingesoft-V"
           fi
           
           echo "Using SonarQube project key: $PROJECT_KEY"
           echo "Organization: ${{ secrets.SONAR_ORGANIZATION }}"
           echo "Branch: ${{ github.ref_name }}"
           echo "Commit SHA: ${{ github.sha }}"
-          echo "SonarQube Host: ${{ secrets.SONAR_HOST_URL }}"
           
-          # Ejecutar análisis de SonarQube con configuración explícita
-          # Es importante especificar la rama para que SonarCloud la reconozca
-          echo "Running SonarQube analysis..."
-          ./mvnw -B sonar:sonar \
-            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
-            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
+          # Ejecutar build, tests y análisis de SonarQube en un solo comando
+          # Este es el formato recomendado por SonarCloud
+          echo "Running build, tests and SonarQube analysis..."
+          ./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
             -Dsonar.projectKey=$PROJECT_KEY \
-            -Dsonar.branch.name=${{ github.ref_name }} \
-            -Dsonar.branch.target=main || {
-              echo "ERROR: SonarQube analysis failed"
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
+            -DskipTests=false \
+            -DfailIfNoTests=false || {
+              echo "ERROR: Build, test or SonarQube analysis failed"
               echo "Please check:"
-              echo "  1. SONAR_TOKEN is valid"
-              echo "  2. SONAR_ORGANIZATION is correct"
+              echo "  1. SONAR_TOKEN is valid and set in GitHub Secrets"
+              echo "  2. SONAR_ORGANIZATION is correct: ${{ secrets.SONAR_ORGANIZATION }}"
               echo "  3. Project key '$PROJECT_KEY' exists in SonarCloud"
-              echo "  4. SonarQube host URL is correct: ${{ secrets.SONAR_HOST_URL }}"
+              echo "  4. Build and tests completed successfully"
               exit 1
             }
           
-          echo "SonarQube analysis completed successfully"
+          echo "✓ Build, tests and SonarQube analysis completed successfully"
 
       - name: Wait for SonarQube analysis to complete
         run: |
@@ -177,28 +175,65 @@ jobs:
                           print(f"  - {proj.get('key', 'N/A')}: {proj.get('name', 'N/A')}")
                   sys.exit(1)
               
-              response = requests.get(metrics_url, params=metrics_params, auth=auth, timeout=30)
+              # Intentar obtener métricas con varios intentos
+              max_retries = 3
+              retry_delay = 10
+              measures_data = None
               
-              if response.status_code == 404:
-                  print(f"WARNING: Project '{PROJECT_KEY}' exists but has no analysis data yet")
-                  print("The project may need to be analyzed first.")
-                  print(f"Please check: {SONAR_HOST}/dashboard?id={PROJECT_KEY}")
-                  # Crear un PDF básico indicando que no hay datos
-                  pdf_filename = 'sonarqube-report.pdf'
-                  doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
-                  story = []
-                  styles = getSampleStyleSheet()
-                  story.append(Paragraph("SonarQube Quality Report", styles['Heading1']))
-                  story.append(Paragraph(f"<b>Project:</b> {PROJECT_KEY}", styles['Normal']))
-                  story.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
-                  story.append(Paragraph("<b>Status:</b> No analysis data available yet. Please run SonarQube analysis first.", styles['Normal']))
-                  story.append(Paragraph(f"<b>Project URL:</b> {SONAR_HOST}/dashboard?id={PROJECT_KEY}", styles['Normal']))
-                  doc.build(story)
-                  print(f"PDF report generated (no data): {pdf_filename}")
-                  sys.exit(0)
+              for attempt in range(max_retries):
+                  response = requests.get(metrics_url, params=metrics_params, auth=auth, timeout=30)
+                  
+                  if response.status_code == 200:
+                      measures_data = response.json()
+                      measures = measures_data.get('component', {}).get('measures', [])
+                      if measures:
+                          print(f"✓ Successfully retrieved {len(measures)} metrics")
+                          break
+                      else:
+                          print(f"Attempt {attempt + 1}: Got response but no measures found")
+                  elif response.status_code == 404:
+                      print(f"Attempt {attempt + 1}: Project not found or no analysis data (404)")
+                      if attempt < max_retries - 1:
+                          print(f"Waiting {retry_delay}s before retry...")
+                          time.sleep(retry_delay)
+                          continue
+                  else:
+                      print(f"Attempt {attempt + 1}: HTTP {response.status_code}")
+                      if attempt < max_retries - 1:
+                          print(f"Waiting {retry_delay}s before retry...")
+                          time.sleep(retry_delay)
+                          continue
+                  
+                  if attempt == max_retries - 1:
+                      # Último intento falló
+                      if response.status_code == 404:
+                          print(f"ERROR: Project '{PROJECT_KEY}' not found or has no analysis data")
+                          print(f"Please check: {SONAR_HOST}/dashboard?id={PROJECT_KEY}")
+                          print("Creating PDF with error message...")
+                          pdf_filename = 'sonarqube-report.pdf'
+                          doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+                          story = []
+                          styles = getSampleStyleSheet()
+                          title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#FF6B6B'), spaceAfter=30, alignment=TA_CENTER)
+                          story.append(Paragraph("SonarQube Quality Report", title_style))
+                          story.append(Paragraph(f"<b>Project:</b> {PROJECT_KEY}", styles['Normal']))
+                          story.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+                          story.append(Spacer(1, 0.2*inch))
+                          story.append(Paragraph("<b>Status:</b> <font color='red'>No analysis data available</font>", styles['Normal']))
+                          story.append(Paragraph("The project may need to be analyzed first or the analysis is still processing.", styles['Normal']))
+                          story.append(Spacer(1, 0.2*inch))
+                          story.append(Paragraph(f"<b>Project URL:</b> {SONAR_HOST}/dashboard?id={PROJECT_KEY}", styles['Normal']))
+                          story.append(Paragraph(f"<b>Organization:</b> alejoamu", styles['Normal']))
+                          doc.build(story)
+                          print(f"PDF report generated (no data): {pdf_filename}")
+                          sys.exit(0)
+                      else:
+                          response.raise_for_status()
+              
+              if not measures_data:
+                  raise Exception("Failed to retrieve metrics after all retries")
               
               response.raise_for_status()
-              measures_data = response.json()
               
               # Obtener información del proyecto
               project_url = f"{base_url}/project_analyses/search"
