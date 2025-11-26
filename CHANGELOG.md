@@ -1,3 +1,28 @@
+## [1.0.4](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.3...v1.0.4) (2025-11-26)
+
+### Features
+
+* Revise Trivy scan steps in code-quality workflow ([49d7876](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/49d78761f510dc5a72e2db4009e81d17bf8714e8))
+
+### Bug Fixes
+
+*  indentation in CI/CD pipeline workflow ([333426b](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/333426b77858c007d59474283fe548150cc1fd02))
+* Add packages write permission to workflow ([8847d97](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/8847d97177f0a862974dd3b28362c6636b736caf))
+* Add sonar.skip property to pom.xml ([10ad905](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/10ad905cdf3bb37aeff6a5945c11e22eb7fe1f20))
+* Add SonarQube organization to code quality workflow ([0ad2455](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/0ad2455d5d0ea3276092260d800552c3f0cd0373))
+* Disable all CI/CD workflows except code-quality ([52007af](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/52007af23a825dd4037d9de65147258966cbd2f2))
+* Enable and update CI/CD GitHub workflows ([cb56541](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/cb565414918bd1bdd1a6faedea4bc9acb5018a1f))
+* Enable pipeline triggers and add JAR build steps ([342f484](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/342f4849b2b59a3a0c2dfb22878efd8036c2e1ab))
+* Remove merge conflict markers from pipeline workflow ([9d03bbe](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/9d03bbe5dfcf673e6cd71a15941aaa26c6ff8d9a))
+* Remove semantic versioning job from pipeline ([9b33d70](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/9b33d704e02e7ad51ff4896fdc34cc74a7d91148))
+* Remove SonarQube code quality job from pipeline ([fec3fc4](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/fec3fc406e12570f3b8aa18337e55e7b6aac567e))
+* Set logout to false in Docker login step ([e489799](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/e4897995bc3190280fc794fd1ca2b724129ae3ee))
+* Switch base image to eclipse-temurin:11-jre in Dockerfiles ([df150bd](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/df150bdb90eed0b6e65aa0d0fad7c09a31a849a5))
+* Update CI workflow and Sonar Maven plugin version ([bcc3a13](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/bcc3a13c43e0307a8af999cb6c43a1ba07ffdc6c))
+* Update IMAGE_PREFIX to use github.repository ([2db6d06](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/2db6d0620de8666d953a2e036ac1fb6cb2dc6263))
+* Update Trivy installation in CI workflow ([1a48615](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/1a4861556fe2b5568c41914e56a16892895abfb4))
+* Update workflow permissions in CI configs ([d9c7c81](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/d9c7c8188a2b2768e41526c82aae03659afaf9d7))
+
 ## [1.0.3](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.2...v1.0.3) (2025-11-25)
 
 ### Bug Fixes
