@@ -1,3 +1,10 @@
+## [1.0.16](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.15...v1.0.16) (2025-11-26)
+
+### Bug Fixes
+
+* Handle SonarCloud authentication errors in PDF report ([87070d5](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/87070d5c1a2a53fb6f738f9804ee3f2cf6f92bfc))
+* Improve SonarCloud analysis and error handling in workflow ([9ead906](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/9ead9065971ddf72fecd4e7db2a9badbf7056b2e))
+
 ## [1.0.15](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.14...v1.0.15) (2025-11-26)
 
 ### Bug Fixes
