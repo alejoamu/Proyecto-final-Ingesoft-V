@@ -263,7 +263,8 @@ jobs:
           context: .
           file: ${{ matrix.service }}/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          load: true
+          tags: ${{ steps.meta.outputs.tags }},${{ matrix.service }}:local-scan
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -274,10 +275,11 @@ jobs:
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ steps.repo-name.outputs.repo_name_lower }}/${{ matrix.service }}:main-${{ github.sha }}
+          image-ref: ${{ matrix.service }}:local-scan
           format: 'sarif'
           output: 'trivy-image-${{ matrix.service }}.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '0'
         if: github.event_name != 'pull_request'
 
       - name: Upload Trivy image scan results
