@@ -1,3 +1,9 @@
+## [1.0.6](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.5...v1.0.6) (2025-11-26)
+
+### Bug Fixes
+
+* Update Docker build and Trivy scan steps in CI ([6a3f310](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/commit/6a3f3106d18910962119616d9e7b2a0864d87612))
+
 ## [1.0.5](https://github.com/alejoamu/Proyecto-final-Ingesoft-V/compare/v1.0.4...v1.0.5) (2025-11-26)
 
 ### Bug Fixes
